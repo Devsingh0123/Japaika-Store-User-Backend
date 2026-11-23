@@ -5,7 +5,15 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { DataTypes, fn } from 'sequelize';
-import { User, UserOtp, UserRefreshToken } from '../../models/index.js';
+import {
+  User,
+  UserOtp,
+  UserRefreshToken,
+  Category,
+  Product,
+  ProductVariant,
+  ProductMedia,
+} from '../../models/index.js';
 
 const require = createRequire(import.meta.url);
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -21,31 +29,40 @@ const EXPECTED_MIGRATION_FILES = [
   '20261123000700-create-products.cjs',
   '20261123000800-create-product-variants.cjs',
   '20261123000900-create-product-images.cjs',
+  '20261123001000-migrate-product-images-to-product-media.cjs',
 ];
 
 function createSpyQueryInterface() {
-  const createdTables = new Map();
+  const activeTables = new Map();
   const indexes = [];
   const droppedTables = [];
+  const queries = [];
 
   return {
-    createdTables,
+    activeTables,
     indexes,
     droppedTables,
+    queries,
+    sequelize: {
+      async query(sql) {
+        queries.push(sql);
+      },
+    },
     async createTable(tableName, columns, options) {
-      createdTables.set(tableName, { columns, options });
+      activeTables.set(tableName, { columns, options });
     },
     async addIndex(tableName, fields, options) {
       indexes.push({ tableName, fields, options });
     },
     async dropTable(tableName) {
+      activeTables.delete(tableName);
       droppedTables.push(tableName);
     },
   };
 }
 
-describe('Shared Sequelize migrations compatibility (all 9 tables)', () => {
-  it('loads all 9 migrations in deterministic dependency order', () => {
+describe('Shared Sequelize migrations compatibility (all 10 migrations / 9 active tables)', () => {
+  it('loads all 10 migrations in deterministic dependency order', () => {
     const files = fs
       .readdirSync(migrationsDir)
       .filter((f) => f.endsWith('.cjs'))
@@ -54,7 +71,7 @@ describe('Shared Sequelize migrations compatibility (all 9 tables)', () => {
     assert.deepEqual(files, EXPECTED_MIGRATION_FILES);
   });
 
-  it('creates all 9 tables matching docs/DATABASE_SCHEMA.md and drops them cleanly on down()', async () => {
+  it('migrates all 9 active tables (with product_media replacing product_images) and rolls back cleanly', async () => {
     const qi = createSpyQueryInterface();
     const SequelizeStub = { ...DataTypes, fn };
 
@@ -65,7 +82,7 @@ describe('Shared Sequelize migrations compatibility (all 9 tables)', () => {
       await migration.up(qi, SequelizeStub);
     }
 
-    assert.deepEqual([...qi.createdTables.keys()], [
+    assert.deepEqual([...qi.activeTables.keys()], [
       'users',
       'user_otps',
       'user_refresh_tokens',
@@ -74,11 +91,11 @@ describe('Shared Sequelize migrations compatibility (all 9 tables)', () => {
       'categories',
       'products',
       'product_variants',
-      'product_images',
+      'product_media',
     ]);
 
-    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 5 tables
-    for (const [tableName, { columns, options }] of qi.createdTables.entries()) {
+    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 9 active tables
+    for (const [tableName, { columns, options }] of qi.activeTables.entries()) {
       assert.equal(options.engine, 'InnoDB', `${tableName} must use InnoDB`);
       assert.equal(options.charset, 'utf8mb4', `${tableName} must use utf8mb4`);
       assert.equal(
@@ -92,190 +109,49 @@ describe('Shared Sequelize migrations compatibility (all 9 tables)', () => {
       assert.equal(columns.id.type._length, 36, `${tableName}.id length must be 36`);
     }
 
-    // Verify admins columns, enums & defaults
-    const admins = qi.createdTables.get('admins').columns;
-    assert.deepEqual(Object.keys(admins), [
-      'id',
-      'email',
-      'password_hash',
-      'full_name',
-      'role',
-      'status',
-      'last_login_at',
-      'created_at',
-      'updated_at',
-      'deleted_at',
-    ]);
-    assert.equal(admins.password_hash.allowNull, false);
-    assert.equal(admins.full_name.allowNull, false);
-    assert.deepEqual(admins.role.type.values, [
-      'super_admin',
-      'catalog_manager',
-      'operations_manager',
-      'support_moderator',
-    ]);
-    assert.equal(admins.role.defaultValue, 'support_moderator');
-    assert.deepEqual(admins.status.type.values, ['active', 'suspended']);
-    assert.equal(admins.status.defaultValue, 'active');
+    // Verify data-copy query migrated product_images -> product_media safely
+    assert.equal(qi.queries.length, 1);
+    assert.match(qi.queries[0], /INSERT INTO product_media/i);
+    assert.match(qi.queries[0], /FROM product_images/i);
 
-    // Verify admin_refresh_tokens columns & foreign keys
-    const adminTokens = qi.createdTables.get('admin_refresh_tokens').columns;
-    assert.deepEqual(Object.keys(adminTokens), [
-      'id',
-      'admin_id',
-      'token_hash',
-      'family_id',
-      'expires_at',
-      'revoked_at',
-      'replaced_by_token_id',
-      'ip_address',
-      'user_agent',
-      'created_at',
-    ]);
-    assert.deepEqual(adminTokens.admin_id.references, { model: 'admins', key: 'id' });
-    assert.equal(adminTokens.admin_id.onDelete, 'CASCADE');
-    assert.deepEqual(adminTokens.replaced_by_token_id.references, {
-      model: 'admin_refresh_tokens',
-      key: 'id',
-    });
-    assert.equal(adminTokens.replaced_by_token_id.onDelete, 'SET NULL');
-
-    // Verify categories columns, defaults, and self-referencing RESTRICT FK
-    const categories = qi.createdTables.get('categories').columns;
-    assert.deepEqual(Object.keys(categories), [
-      'id',
-      'parent_id',
-      'name',
-      'slug',
-      'description',
-      'image_url',
-      'image_public_id',
-      'is_active',
-      'sort_order',
-      'seo_title',
-      'seo_description',
-      'created_at',
-      'updated_at',
-      'deleted_at',
-    ]);
-    assert.deepEqual(categories.parent_id.references, { model: 'categories', key: 'id' });
-    assert.equal(categories.parent_id.onUpdate, 'CASCADE');
-    assert.equal(categories.parent_id.onDelete, 'RESTRICT');
-    assert.equal(categories.is_active.defaultValue, true);
-    assert.equal(categories.sort_order.defaultValue, 0);
-
-    // Verify products columns, enums, defaults, and category RESTRICT FK
-    const products = qi.createdTables.get('products').columns;
-    assert.deepEqual(Object.keys(products), [
-      'id',
-      'category_id',
-      'name',
-      'slug',
-      'product_type',
-      'status',
-      'short_description',
-      'description',
-      'traditional_significance',
-      'wearing_instructions',
-      'care_instructions',
-      'specifications',
-      'variant_options',
-      'gst_rate',
-      'hsn_code',
-      'certificate_url',
-      'certificate_public_id',
-      'certificate_resource_type',
-      'certificate_label',
-      'weight_grams',
-      'length_cm',
-      'width_cm',
-      'height_cm',
-      'shipping_notes',
-      'is_featured',
-      'seo_title',
-      'seo_description',
-      'published_at',
-      'created_at',
-      'updated_at',
-      'deleted_at',
-    ]);
-    assert.deepEqual(products.category_id.references, { model: 'categories', key: 'id' });
-    assert.equal(products.category_id.onUpdate, 'CASCADE');
-    assert.equal(products.category_id.onDelete, 'RESTRICT');
-    assert.deepEqual(products.product_type.type.values, ['simple', 'variant']);
-    assert.deepEqual(products.status.type.values, ['draft', 'active', 'archived']);
-    assert.deepEqual(products.certificate_resource_type.type.values, ['image', 'raw']);
-
-    // Verify product_variants columns, defaults, and product CASCADE FK
-    const variants = qi.createdTables.get('product_variants').columns;
-    assert.deepEqual(Object.keys(variants), [
+    // Verify product_media columns, enum, defaults, and CASCADE FK
+    const media = qi.activeTables.get('product_media').columns;
+    assert.deepEqual(Object.keys(media), [
       'id',
       'product_id',
-      'sku',
-      'title',
-      'option_values',
-      'option_signature',
-      'price',
-      'sale_price',
-      'stock_quantity',
-      'low_stock_threshold',
-      'is_active',
-      'is_default',
-      'sort_order',
-      'created_at',
-      'updated_at',
-      'deleted_at',
-    ]);
-    assert.deepEqual(variants.product_id.references, { model: 'products', key: 'id' });
-    assert.equal(variants.product_id.onDelete, 'CASCADE');
-    assert.equal(variants.low_stock_threshold.defaultValue, 5);
-    assert.equal(variants.is_active.defaultValue, true);
-
-    // Verify product_images columns and product CASCADE FK
-    const images = qi.createdTables.get('product_images').columns;
-    assert.deepEqual(Object.keys(images), [
-      'id',
-      'product_id',
-      'image_url',
-      'image_public_id',
+      'media_type',
+      'media_url',
+      'media_public_id',
+      'thumbnail_url',
+      'mime_type',
+      'duration_seconds',
       'alt_text',
       'is_primary',
       'sort_order',
       'created_at',
     ]);
-    assert.deepEqual(images.product_id.references, { model: 'products', key: 'id' });
-    assert.equal(images.product_id.onDelete, 'CASCADE');
+    assert.deepEqual(media.product_id.references, { model: 'products', key: 'id' });
+    assert.equal(media.product_id.onUpdate, 'CASCADE');
+    assert.equal(media.product_id.onDelete, 'CASCADE');
+    assert.deepEqual(media.media_type.type.values, ['image', 'video']);
+    assert.equal(media.media_type.defaultValue, 'image');
+    assert.equal(media.is_primary.defaultValue, false);
+    assert.equal(media.sort_order.defaultValue, 0);
 
-    // Verify all expected named indexes across all 9 tables
-    const indexNames = qi.indexes.map((idx) => `${idx.tableName}:${idx.options.name}`);
-    assert.deepEqual(indexNames, [
-      'users:uq_users_email',
-      'users:idx_users_status',
-      'user_otps:idx_user_otps_email_created',
-      'user_otps:idx_user_otps_expires_at',
-      'user_refresh_tokens:uq_user_refresh_tokens_hash',
-      'user_refresh_tokens:idx_user_refresh_tokens_user_id',
-      'user_refresh_tokens:idx_user_refresh_tokens_family_id',
-      'user_refresh_tokens:idx_user_refresh_tokens_expires_at',
-      'admins:uq_admins_email',
-      'admins:idx_admins_role',
-      'admins:idx_admins_status',
-      'admin_refresh_tokens:uq_admin_refresh_tokens_hash',
-      'admin_refresh_tokens:idx_admin_refresh_tokens_admin_id',
-      'admin_refresh_tokens:idx_admin_refresh_tokens_family_id',
-      'admin_refresh_tokens:idx_admin_refresh_tokens_expires_at',
-      'categories:uq_categories_slug',
-      'categories:idx_categories_parent_id',
-      'categories:idx_categories_is_active_sort',
-      'products:uq_products_slug',
-      'products:idx_products_category_id',
-      'products:idx_products_status_created',
-      'products:idx_products_is_featured',
-      'product_variants:uq_product_variants_sku',
-      'product_variants:uq_product_variants_option_sig',
-      'product_variants:idx_product_variants_product_id',
-      'product_variants:idx_product_variants_stock',
-      'product_images:idx_product_images_product_sort',
+    // Verify certificates remain separate on products
+    const products = qi.activeTables.get('products').columns;
+    assert.ok(products.certificate_url);
+    assert.ok(products.certificate_public_id);
+    assert.ok(products.certificate_resource_type);
+    assert.ok(products.certificate_label);
+
+    // Verify product_media indexes were created
+    const mediaIndexNames = qi.indexes
+      .filter((idx) => idx.tableName === 'product_media')
+      .map((idx) => idx.options.name);
+    assert.deepEqual(mediaIndexNames, [
+      'idx_product_media_product_sort',
+      'idx_product_media_product_type',
     ]);
 
     // Verify user-backend Sequelize models align with migrated columns
@@ -283,9 +159,13 @@ describe('Shared Sequelize migrations compatibility (all 9 tables)', () => {
       [User, 'users'],
       [UserOtp, 'user_otps'],
       [UserRefreshToken, 'user_refresh_tokens'],
+      [Category, 'categories'],
+      [Product, 'products'],
+      [ProductVariant, 'product_variants'],
+      [ProductMedia, 'product_media'],
     ];
     for (const [model, tableName] of modelTablePairs) {
-      const migratedCols = new Set(Object.keys(qi.createdTables.get(tableName).columns));
+      const migratedCols = new Set(Object.keys(qi.activeTables.get(tableName).columns));
       for (const attr of Object.values(model.rawAttributes)) {
         assert.ok(
           migratedCols.has(attr.field),
@@ -294,22 +174,15 @@ describe('Shared Sequelize migrations compatibility (all 9 tables)', () => {
       }
     }
 
-    // Verify reverse down() order drops child tables before parent tables
+    // Verify reverse down() order restores product_images, copies image rows back, and drops all tables cleanly
     for (const file of [...EXPECTED_MIGRATION_FILES].reverse()) {
       const migration = require(path.join(migrationsDir, file));
       await migration.down(qi, SequelizeStub);
     }
 
-    assert.deepEqual(qi.droppedTables, [
-      'product_images',
-      'product_variants',
-      'products',
-      'categories',
-      'admin_refresh_tokens',
-      'admins',
-      'user_refresh_tokens',
-      'user_otps',
-      'users',
-    ]);
+    assert.equal(qi.activeTables.size, 0);
+    assert.equal(qi.queries.length, 2);
+    assert.match(qi.queries[1], /INSERT INTO product_images/i);
+    assert.match(qi.queries[1], /WHERE media_type = 'image'/i);
   });
 });

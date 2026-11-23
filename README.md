@@ -31,7 +31,8 @@ Customer-facing REST API for the standalone Japaika E-commerce platform, built w
    - `20261119000600-create-categories.cjs` (`categories`)
    - `20261123000700-create-products.cjs` (`products`)
    - `20261123000800-create-product-variants.cjs` (`product_variants`)
-   - `20261123000900-create-product-images.cjs` (`product_images`)
+   - `20261123000900-create-product-images.cjs` (`product_images` — superseded by `product_media`)
+   - `20261123001000-migrate-product-images-to-product-media.cjs` (`product_media` — unified images & short videos)
 
    Other migration commands:
    - `npm run migrate:status` — Inspect applied/pending migrations
@@ -68,3 +69,7 @@ npm test
 | `POST` | `/api/v1/auth/logout` | Optional Cookie | Revoke current refresh token & clear auth cookies |
 | `POST` | `/api/v1/auth/logout-all` | Access Cookie | Revoke all active refresh tokens for the customer |
 | `GET` | `/api/v1/auth/me` | Access Cookie | Get currently authenticated customer profile |
+| `GET` | `/api/v1/categories` | Public | List active categories & nested active subcategories with counts and SEO |
+| `GET` | `/api/v1/categories/:slug` | Public | Get active category/subcategory details by slug (with parent breadcrumb) |
+| `GET` | `/api/v1/products` | Public | Paginated catalog listing with search (`search`/`q`), category, stock, sale, price range, and sort |
+| `GET` | `/api/v1/products/:slug` | Public | Full customer-safe product detail (variants, unified image+video media, certificate, specs, shipping, SEO) |
