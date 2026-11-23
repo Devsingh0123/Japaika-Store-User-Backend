@@ -22,7 +22,7 @@ module.exports = {
   },
   test: {
     ...baseConfig,
-    database: process.env.TEST_DB_NAME || 'japaika_ecommerce_test',
+    database: process.env.DB_NAME || 'japaika_ecommerce',
   },
   production: {
     ...baseConfig,

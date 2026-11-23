@@ -2,8 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { parseEnv } from '../../config/env.js';
 import {
+  getJwtSecrets,
   parseDurationToMs,
   hashToken,
   signAccessToken,
@@ -11,6 +11,8 @@ import {
   verifyAccessToken,
   verifyRefreshToken,
 } from '../../services/token.service.js';
+import { getOtpHmacSecret } from '../../services/auth.service.js';
+import { getEmailConfig } from '../../services/email.service.js';
 
 describe('token.service', () => {
   it('parses duration strings into milliseconds', () => {
@@ -23,8 +25,7 @@ describe('token.service', () => {
 
   it('signs and verifies customer access tokens with strict claims', () => {
     const user = { id: crypto.randomUUID(), email: 'buyer@example.com' };
-    const token = signAccessToken(user);
-    const payload = verifyAccessToken(token);
+    const payload = verifyAccessToken(signAccessToken(user));
 
     assert.equal(payload.sub, user.id);
     assert.equal(payload.email, user.email);
@@ -34,7 +35,7 @@ describe('token.service', () => {
     assert.equal(payload.aud, 'japaika-user');
   });
 
-  it('rejects refresh tokens or tokens signed with wrong secret when verifying access tokens', () => {
+  it('rejects refresh tokens and foreign tokens when verifying access tokens', () => {
     const userId = crypto.randomUUID();
     const refreshToken = signRefreshToken({
       userId,
@@ -57,9 +58,7 @@ describe('token.service', () => {
     const tokenId = crypto.randomUUID();
     const familyId = crypto.randomUUID();
 
-    const refreshToken = signRefreshToken({ userId, tokenId, familyId });
-    const payload = verifyRefreshToken(refreshToken);
-
+    const payload = verifyRefreshToken(signRefreshToken({ userId, tokenId, familyId }));
     assert.equal(payload.sub, userId);
     assert.equal(payload.jti, tokenId);
     assert.equal(payload.familyId, familyId);
@@ -72,36 +71,55 @@ describe('token.service', () => {
 
   it('hashes raw tokens deterministically with SHA-256', () => {
     const h1 = hashToken('sample-token-value');
-    const h2 = hashToken('sample-token-value');
-    const h3 = hashToken('different-token-value');
-
     assert.equal(h1.length, 64);
-    assert.equal(h1, h2);
-    assert.notEqual(h1, h3);
+    assert.equal(h1, hashToken('sample-token-value'));
+    assert.notEqual(h1, hashToken('different-token-value'));
   });
 });
 
-describe('config/env production safety validation', () => {
-  it('rejects identical access and refresh secrets', () => {
+describe('production environment safety checks', () => {
+  it('rejects identical access and refresh secrets and placeholder secrets in production', () => {
     const sameSecret = 'a_shared_secret_value_that_is_over_32_chars_long';
     assert.throws(
-      () =>
-        parseEnv({
-          USER_JWT_ACCESS_SECRET: sameSecret,
-          USER_JWT_REFRESH_SECRET: sameSecret,
-        }),
+      () => getJwtSecrets({ USER_JWT_ACCESS_SECRET: sameSecret, USER_JWT_REFRESH_SECRET: sameSecret }),
       /must differ/
+    );
+
+    assert.throws(
+      () =>
+        getJwtSecrets({
+          NODE_ENV: 'production',
+          USER_JWT_ACCESS_SECRET: 'change_me_access_secret_min_32_chars_long',
+          USER_JWT_REFRESH_SECRET: 'change_me_refresh_secret_min_32_chars_long',
+        }),
+      /Production requires custom/
+    );
+
+    assert.throws(
+      () =>
+        getOtpHmacSecret({
+          NODE_ENV: 'production',
+          OTP_HMAC_SECRET: 'change_me_otp_hmac_secret_min_32_chars_long',
+        }),
+      /Production requires a custom OTP_HMAC_SECRET/
     );
   });
 
-  it('rejects console email transport and default secrets in production', () => {
+  it('auto-detects SMTP vs console transport, derives TLS on port 465, and requires SMTP_HOST in production', () => {
+    const devConfig = getEmailConfig({ NODE_ENV: 'development' });
+    assert.equal(devConfig.transport, 'console');
+
+    const smtp587 = getEmailConfig({ NODE_ENV: 'production', SMTP_HOST: 'smtp.example.com', SMTP_PORT: '587' });
+    assert.equal(smtp587.transport, 'smtp');
+    assert.equal(smtp587.smtp.secure, false);
+
+    const smtp465 = getEmailConfig({ NODE_ENV: 'production', SMTP_HOST: 'smtp.example.com', SMTP_PORT: '465' });
+    assert.equal(smtp465.transport, 'smtp');
+    assert.equal(smtp465.smtp.secure, true);
+
     assert.throws(
-      () =>
-        parseEnv({
-          NODE_ENV: 'production',
-          EMAIL_TRANSPORT: 'console',
-        }),
-      /EMAIL_TRANSPORT must be "smtp" in production/
+      () => getEmailConfig({ NODE_ENV: 'production', SMTP_HOST: '' }),
+      /SMTP_HOST is required in production/
     );
   });
 });

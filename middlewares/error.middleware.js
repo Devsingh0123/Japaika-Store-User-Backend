@@ -1,6 +1,4 @@
-import env from '../config/env.js';
-import AppError from '../utils/appError.js';
-import { sendError } from '../utils/response.js';
+import { AppError, sendError } from '../utils/http.js';
 
 export function notFoundHandler(req, res) {
   return sendError(res, {
@@ -41,7 +39,7 @@ export function errorHandler(err, _req, res, _next) {
     });
   }
 
-  if (!env.isTest) {
+  if (process.env.NODE_ENV !== 'test') {
     console.error('[ERROR]', err);
   }
 
@@ -51,8 +49,3 @@ export function errorHandler(err, _req, res, _next) {
     message: 'An unexpected error occurred. Please try again later.',
   });
 }
-
-export default {
-  notFoundHandler,
-  errorHandler,
-};

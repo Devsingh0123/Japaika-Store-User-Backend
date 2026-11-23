@@ -2,49 +2,47 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import env from './config/env.js';
-import { createApiRouter } from './routes/index.js';
+import { sequelize } from './models/index.js';
+import authRoutes from './routes/auth.routes.js';
 import { notFoundHandler, errorHandler } from './middlewares/error.middleware.js';
+import { sendSuccess, sendError } from './utils/http.js';
 
-export function createApp({
-  sequelize,
-  User,
-  authService,
-  tokenService,
-  enableRateLimit = true,
-} = {}) {
-  const app = express();
+const app = express();
 
-  if (env.trustProxy > 0) {
-    app.set('trust proxy', env.trustProxy);
-  }
-
-  app.use(helmet());
-  app.use(
-    cors({
-      origin: env.userFrontendUrl,
-      credentials: true,
-    })
-  );
-  app.use(express.json({ limit: '100kb' }));
-  app.use(cookieParser());
-
-  app.use(
-    '/api/v1',
-    createApiRouter({
-      sequelize,
-      User,
-      authService,
-      tokenService,
-      enableRateLimit,
-    })
-  );
-
-  app.use(notFoundHandler);
-  app.use(errorHandler);
-
-  return app;
+const trustProxy = Number(process.env.TRUST_PROXY ?? (process.env.NODE_ENV === 'production' ? 1 : 0));
+if (trustProxy > 0) {
+  app.set('trust proxy', trustProxy);
 }
 
-const app = createApp();
+app.use(helmet());
+app.use(
+  cors({
+    origin: process.env.USER_FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: '100kb' }));
+app.use(cookieParser());
+
+app.get('/api/v1/health', async (_req, res) => {
+  try {
+    await sequelize.authenticate();
+    return sendSuccess(res, {
+      message: 'User backend is healthy',
+      data: { service: 'user-backend', status: 'ok', database: 'connected' },
+    });
+  } catch {
+    return sendError(res, {
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'Database connection is unavailable.',
+    });
+  }
+});
+
+app.use('/api/v1/auth', authRoutes);
+
+app.use(notFoundHandler);
+app.use(errorHandler);
+
 export default app;

@@ -1,4 +1,4 @@
-import AppError from '../utils/appError.js';
+import { AppError } from '../utils/http.js';
 
 export function validateBody(schema) {
   return (req, _res, next) => {
@@ -15,7 +15,3 @@ export function validateBody(schema) {
     return next();
   };
 }
-
-export default {
-  validateBody,
-};

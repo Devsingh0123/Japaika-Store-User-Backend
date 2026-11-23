@@ -14,7 +14,6 @@ module.exports = {
         email: {
           type: Sequelize.STRING(255),
           allowNull: false,
-          unique: true,
         },
         full_name: {
           type: Sequelize.STRING(120),
@@ -59,6 +58,11 @@ module.exports = {
         engine: 'InnoDB',
       }
     );
+
+    await queryInterface.addIndex('users', ['email'], {
+      unique: true,
+      name: 'uq_users_email',
+    });
 
     await queryInterface.addIndex('users', ['status'], {
       name: 'idx_users_status',

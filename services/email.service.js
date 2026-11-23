@@ -1,27 +1,45 @@
 import nodemailer from 'nodemailer';
-import env from '../config/env.js';
 
 let smtpTransporter = null;
 
-function getSmtpTransporter() {
+export function getEmailConfig(raw = process.env) {
+  const isProd = raw.NODE_ENV === 'production';
+  const host = (raw.SMTP_HOST || '').trim();
+  const port = Number(raw.SMTP_PORT || 587);
+  const transport = host ? 'smtp' : 'console';
+
+  if (isProd && !host) {
+    throw new Error('SMTP_HOST is required in production.');
+  }
+
+  return {
+    isProd,
+    isTest: raw.NODE_ENV === 'test',
+    transport,
+    from: raw.EMAIL_FROM || 'Japaika <no-reply@japaika.example>',
+    smtp: {
+      host,
+      port,
+      secure: port === 465,
+      user: raw.SMTP_USER || '',
+      pass: raw.SMTP_PASS || '',
+    },
+  };
+}
+
+function getSmtpTransporter(smtp) {
   if (!smtpTransporter) {
     smtpTransporter = nodemailer.createTransport({
-      host: env.email.smtp.host,
-      port: env.email.smtp.port,
-      secure: env.email.smtp.secure,
-      auth:
-        env.email.smtp.user || env.email.smtp.pass
-          ? {
-              user: env.email.smtp.user,
-              pass: env.email.smtp.pass,
-            }
-          : undefined,
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      auth: smtp.user || smtp.pass ? { user: smtp.user, pass: smtp.pass } : undefined,
     });
   }
   return smtpTransporter;
 }
 
-function buildOtpEmailContent({ otp, expiresInMinutes }) {
+function buildOtpEmail({ otp, expiresInMinutes }) {
   const subject = `${otp} is your Japaika verification code`;
   const text = [
     `Your Japaika verification code is: ${otp}`,
@@ -33,7 +51,7 @@ function buildOtpEmailContent({ otp, expiresInMinutes }) {
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; color: #1f2937;">
       <h2 style="margin: 0 0 12px; font-size: 20px; color: #111827;">Japaika Verification Code</h2>
-      <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.5;">Use the verification code below to sign in to your Japaika account:</p>
+      <p style="margin: 0 0 16px; font-size: 15px;">Use the verification code below to sign in to your Japaika account:</p>
       <div style="margin: 20px 0; padding: 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; text-align: center; font-size: 28px; font-weight: 700; letter-spacing: 6px; color: #111827;">
         ${otp}
       </div>
@@ -45,31 +63,28 @@ function buildOtpEmailContent({ otp, expiresInMinutes }) {
   return { subject, text, html };
 }
 
-export async function sendOtpEmail({ to, otp, expiresInMinutes = env.otp.expiryMinutes }) {
-  const { subject, text, html } = buildOtpEmailContent({ otp, expiresInMinutes });
+const emailService = {
+  async sendOtpEmail({ to, otp, expiresInMinutes = 10 }) {
+    const config = getEmailConfig();
+    const { subject, text, html } = buildOtpEmail({ otp, expiresInMinutes });
 
-  if (env.email.transport === 'console') {
-    if (env.isProd) {
-      throw new Error('Console email transport is prohibited in production.');
+    if (config.transport === 'console') {
+      if (!config.isTest) {
+        console.info(`[EMAIL:CONSOLE] To: ${to} | Subject: ${subject} | OTP: ${otp}`);
+      }
+      return { delivered: true, transport: 'console' };
     }
-    if (!env.isTest) {
-      console.info(`[EMAIL:CONSOLE] To: ${to} | Subject: ${subject} | OTP: ${otp}`);
-    }
-    return { delivered: true, transport: 'console' };
-  }
 
-  const transporter = getSmtpTransporter();
-  const info = await transporter.sendMail({
-    from: env.email.from,
-    to,
-    subject,
-    text,
-    html,
-  });
+    const info = await getSmtpTransporter(config.smtp).sendMail({
+      from: config.from,
+      to,
+      subject,
+      text,
+      html,
+    });
 
-  return { delivered: true, transport: 'smtp', messageId: info.messageId };
-}
-
-export default {
-  sendOtpEmail,
+    return { delivered: true, transport: 'smtp', messageId: info.messageId };
+  },
 };
+
+export default emailService;

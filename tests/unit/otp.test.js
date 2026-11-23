@@ -5,9 +5,9 @@ import {
   generateOtp,
   hashOtp,
   verifyOtpHash,
-} from '../../services/otp.service.js';
+} from '../../services/auth.service.js';
 
-describe('otp.service', () => {
+describe('OTP crypto helpers', () => {
   it('normalizes email by trimming whitespace and lowercasing', () => {
     assert.equal(normalizeEmail('  Ananya.Sharma@Example.COM  '), 'ananya.sharma@example.com');
   });
@@ -24,13 +24,11 @@ describe('otp.service', () => {
     const secret = 'test_otp_hmac_secret_with_at_least_32_characters';
     const hash1 = hashOtp('User@Example.com', '482913', secret);
     const hash2 = hashOtp('  user@example.com ', '482913', secret);
-    const hashDifferentEmail = hashOtp('other@example.com', '482913', secret);
-    const hashDifferentOtp = hashOtp('user@example.com', '482914', secret);
 
     assert.equal(hash1.length, 64);
     assert.equal(hash1, hash2);
-    assert.notEqual(hash1, hashDifferentEmail);
-    assert.notEqual(hash1, hashDifferentOtp);
+    assert.notEqual(hash1, hashOtp('other@example.com', '482913', secret));
+    assert.notEqual(hash1, hashOtp('user@example.com', '482914', secret));
   });
 
   it('verifies matching OTP hashes and rejects mismatches or malformed hashes', () => {

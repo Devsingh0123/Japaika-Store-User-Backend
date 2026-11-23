@@ -24,7 +24,6 @@ module.exports = {
         token_hash: {
           type: Sequelize.CHAR(64),
           allowNull: false,
-          unique: true,
         },
         family_id: {
           type: Sequelize.CHAR(36),
@@ -68,6 +67,11 @@ module.exports = {
         engine: 'InnoDB',
       }
     );
+
+    await queryInterface.addIndex('user_refresh_tokens', ['token_hash'], {
+      unique: true,
+      name: 'uq_user_refresh_tokens_hash',
+    });
 
     await queryInterface.addIndex('user_refresh_tokens', ['user_id'], {
       name: 'idx_user_refresh_tokens_user_id',
