@@ -33,6 +33,7 @@ Customer-facing REST API for the standalone Japaika E-commerce platform, built w
    - `20261123000800-create-product-variants.cjs` (`product_variants`)
    - `20261123000900-create-product-images.cjs` (`product_images` — superseded by `product_media`)
    - `20261123001000-migrate-product-images-to-product-media.cjs` (`product_media` — unified images & short videos)
+   - `20261124001100-create-banners.cjs` (`banners` — dynamic homepage hero & promo banners)
 
    Other migration commands:
    - `npm run migrate:status` — Inspect applied/pending migrations
@@ -73,3 +74,4 @@ npm test
 | `GET` | `/api/v1/categories/:slug` | Public | Get active category/subcategory details by slug (with parent breadcrumb) |
 | `GET` | `/api/v1/products` | Public | Paginated catalog listing with search (`search`/`q`), category, stock, sale, price range, and sort |
 | `GET` | `/api/v1/products/:slug` | Public | Full customer-safe product detail (variants, unified image+video media, certificate, specs, shipping, SEO) |
+| `GET` | `/api/v1/banners` | Public | List active, in-schedule homepage banners (`?placement=homepage_hero\|homepage_promo&limit=10`) |

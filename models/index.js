@@ -6,6 +6,7 @@ import defineCategoryModel from './category.model.js';
 import defineProductModel, { PRODUCT_TYPES, PRODUCT_STATUSES } from './product.model.js';
 import defineProductVariantModel from './productVariant.model.js';
 import defineProductMediaModel, { PRODUCT_MEDIA_TYPES } from './productMedia.model.js';
+import defineBannerModel, { BANNER_PLACEMENTS } from './banner.model.js';
 
 const User = defineUserModel(sequelize);
 const UserOtp = defineUserOtpModel(sequelize);
@@ -14,6 +15,7 @@ const Category = defineCategoryModel(sequelize);
 const Product = defineProductModel(sequelize);
 const ProductVariant = defineProductVariantModel(sequelize);
 const ProductMedia = defineProductMediaModel(sequelize);
+const Banner = defineBannerModel(sequelize);
 
 User.hasMany(UserRefreshToken, {
   foreignKey: 'user_id',
@@ -74,9 +76,11 @@ export {
   Product,
   ProductVariant,
   ProductMedia,
+  Banner,
   PRODUCT_TYPES,
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
+  BANNER_PLACEMENTS,
 };
 
 export default {
@@ -88,7 +92,9 @@ export default {
   Product,
   ProductVariant,
   ProductMedia,
+  Banner,
   PRODUCT_TYPES,
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
+  BANNER_PLACEMENTS,
 };

@@ -13,6 +13,7 @@ import {
   Product,
   ProductVariant,
   ProductMedia,
+  Banner,
 } from '../../models/index.js';
 
 const require = createRequire(import.meta.url);
@@ -30,6 +31,7 @@ const EXPECTED_MIGRATION_FILES = [
   '20261123000800-create-product-variants.cjs',
   '20261123000900-create-product-images.cjs',
   '20261123001000-migrate-product-images-to-product-media.cjs',
+  '20261124001100-create-banners.cjs',
 ];
 
 function createSpyQueryInterface() {
@@ -61,8 +63,8 @@ function createSpyQueryInterface() {
   };
 }
 
-describe('Shared Sequelize migrations compatibility (all 10 migrations / 9 active tables)', () => {
-  it('loads all 10 migrations in deterministic dependency order', () => {
+describe('Shared Sequelize migrations compatibility (all 11 migrations / 10 active tables)', () => {
+  it('loads all 11 migrations in deterministic dependency order', () => {
     const files = fs
       .readdirSync(migrationsDir)
       .filter((f) => f.endsWith('.cjs'))
@@ -71,7 +73,7 @@ describe('Shared Sequelize migrations compatibility (all 10 migrations / 9 activ
     assert.deepEqual(files, EXPECTED_MIGRATION_FILES);
   });
 
-  it('migrates all 9 active tables (with product_media replacing product_images) and rolls back cleanly', async () => {
+  it('migrates all 10 active tables (with product_media and banners) and rolls back cleanly', async () => {
     const qi = createSpyQueryInterface();
     const SequelizeStub = { ...DataTypes, fn };
 
@@ -92,9 +94,10 @@ describe('Shared Sequelize migrations compatibility (all 10 migrations / 9 activ
       'products',
       'product_variants',
       'product_media',
+      'banners',
     ]);
 
-    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 9 active tables
+    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 10 active tables
     for (const [tableName, { columns, options }] of qi.activeTables.entries()) {
       assert.equal(options.engine, 'InnoDB', `${tableName} must use InnoDB`);
       assert.equal(options.charset, 'utf8mb4', `${tableName} must use utf8mb4`);
@@ -154,6 +157,42 @@ describe('Shared Sequelize migrations compatibility (all 10 migrations / 9 activ
       'idx_product_media_product_type',
     ]);
 
+    // Verify banners columns, enum, defaults, and indexes
+    const banners = qi.activeTables.get('banners').columns;
+    assert.deepEqual(Object.keys(banners), [
+      'id',
+      'title',
+      'subtitle',
+      'badge_text',
+      'image_url',
+      'image_public_id',
+      'mobile_image_url',
+      'mobile_image_public_id',
+      'alt_text',
+      'cta_label',
+      'cta_url',
+      'placement',
+      'sort_order',
+      'is_active',
+      'starts_at',
+      'ends_at',
+      'created_at',
+      'updated_at',
+      'deleted_at',
+    ]);
+    assert.deepEqual(banners.placement.type.values, ['homepage_hero', 'homepage_promo']);
+    assert.equal(banners.placement.defaultValue, 'homepage_hero');
+    assert.equal(banners.sort_order.defaultValue, 0);
+    assert.equal(banners.is_active.defaultValue, true);
+
+    const bannerIndexNames = qi.indexes
+      .filter((idx) => idx.tableName === 'banners')
+      .map((idx) => idx.options.name);
+    assert.deepEqual(bannerIndexNames, [
+      'idx_banners_placement_active_sort',
+      'idx_banners_schedule',
+    ]);
+
     // Verify user-backend Sequelize models align with migrated columns
     const modelTablePairs = [
       [User, 'users'],
@@ -163,6 +202,7 @@ describe('Shared Sequelize migrations compatibility (all 10 migrations / 9 activ
       [Product, 'products'],
       [ProductVariant, 'product_variants'],
       [ProductMedia, 'product_media'],
+      [Banner, 'banners'],
     ];
     for (const [model, tableName] of modelTablePairs) {
       const migratedCols = new Set(Object.keys(qi.activeTables.get(tableName).columns));
