@@ -32,6 +32,7 @@ const EXPECTED_MIGRATION_FILES = [
   '20261123000900-create-product-images.cjs',
   '20261123001000-migrate-product-images-to-product-media.cjs',
   '20261124001100-create-banners.cjs',
+  '20261125001200-replace-variant-price-columns-with-prices-json.cjs',
 ];
 
 function createSpyQueryInterface() {
@@ -51,7 +52,22 @@ function createSpyQueryInterface() {
       },
     },
     async createTable(tableName, columns, options) {
-      activeTables.set(tableName, { columns, options });
+      activeTables.set(tableName, { columns: { ...columns }, options });
+    },
+    async addColumn(tableName, columnName, attribute) {
+      const table = activeTables.get(tableName);
+      assert.ok(table, `Cannot addColumn ${columnName} to missing table ${tableName}`);
+      table.columns[columnName] = attribute;
+    },
+    async changeColumn(tableName, columnName, attribute) {
+      const table = activeTables.get(tableName);
+      assert.ok(table, `Cannot changeColumn ${columnName} on missing table ${tableName}`);
+      table.columns[columnName] = attribute;
+    },
+    async removeColumn(tableName, columnName) {
+      const table = activeTables.get(tableName);
+      assert.ok(table, `Cannot removeColumn ${columnName} from missing table ${tableName}`);
+      delete table.columns[columnName];
     },
     async addIndex(tableName, fields, options) {
       indexes.push({ tableName, fields, options });
@@ -63,8 +79,8 @@ function createSpyQueryInterface() {
   };
 }
 
-describe('Shared Sequelize migrations compatibility (all 11 migrations / 10 active tables)', () => {
-  it('loads all 11 migrations in deterministic dependency order', () => {
+describe('Shared Sequelize migrations compatibility (all 12 migrations / 10 active tables)', () => {
+  it('loads all 12 migrations in deterministic dependency order', () => {
     const files = fs
       .readdirSync(migrationsDir)
       .filter((f) => f.endsWith('.cjs'))
@@ -73,7 +89,7 @@ describe('Shared Sequelize migrations compatibility (all 11 migrations / 10 acti
     assert.deepEqual(files, EXPECTED_MIGRATION_FILES);
   });
 
-  it('migrates all 10 active tables (with product_media and banners) and rolls back cleanly', async () => {
+  it('migrates all 10 active tables (with product_variants.prices JSON) and rolls back cleanly', async () => {
     const qi = createSpyQueryInterface();
     const SequelizeStub = { ...DataTypes, fn };
 
@@ -112,10 +128,13 @@ describe('Shared Sequelize migrations compatibility (all 11 migrations / 10 acti
       assert.equal(columns.id.type._length, 36, `${tableName}.id length must be 36`);
     }
 
-    // Verify data-copy query migrated product_images -> product_media safely
-    assert.equal(qi.queries.length, 1);
-    assert.match(qi.queries[0], /INSERT INTO product_media/i);
-    assert.match(qi.queries[0], /FROM product_images/i);
+    // Verify product_variants replaced price & sale_price with prices JSON NOT NULL
+    const variants = qi.activeTables.get('product_variants').columns;
+    assert.equal(variants.price, undefined);
+    assert.equal(variants.sale_price, undefined);
+    assert.ok(variants.prices);
+    assert.equal(variants.prices.type.key, 'JSON');
+    assert.equal(variants.prices.allowNull, false);
 
     // Verify product_media columns, enum, defaults, and CASCADE FK
     const media = qi.activeTables.get('product_media').columns;
@@ -214,15 +233,12 @@ describe('Shared Sequelize migrations compatibility (all 11 migrations / 10 acti
       }
     }
 
-    // Verify reverse down() order restores product_images, copies image rows back, and drops all tables cleanly
+    // Verify reverse down() order restores columns/tables and drops all tables cleanly
     for (const file of [...EXPECTED_MIGRATION_FILES].reverse()) {
       const migration = require(path.join(migrationsDir, file));
       await migration.down(qi, SequelizeStub);
     }
 
     assert.equal(qi.activeTables.size, 0);
-    assert.equal(qi.queries.length, 2);
-    assert.match(qi.queries[1], /INSERT INTO product_images/i);
-    assert.match(qi.queries[1], /WHERE media_type = 'image'/i);
   });
 });

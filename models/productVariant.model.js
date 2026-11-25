@@ -1,5 +1,13 @@
 import { DataTypes } from 'sequelize';
 
+export const SUPPORTED_MARKETS = Object.freeze({
+  IN: Object.freeze({ country: 'IN', currency: 'INR' }),
+  US: Object.freeze({ country: 'US', currency: 'USD' }),
+});
+
+export const SUPPORTED_COUNTRIES = Object.freeze(Object.keys(SUPPORTED_MARKETS));
+export const DEFAULT_COUNTRY = 'IN';
+
 export default function defineProductVariantModel(sequelize) {
   return sequelize.define(
     'ProductVariant',
@@ -37,16 +45,9 @@ export default function defineProductVariantModel(sequelize) {
         defaultValue: null,
         field: 'option_signature',
       },
-      price: {
-        type: DataTypes.DECIMAL(10, 2),
+      prices: {
+        type: DataTypes.JSON,
         allowNull: false,
-        defaultValue: 0.0,
-      },
-      salePrice: {
-        type: DataTypes.DECIMAL(10, 2),
-        allowNull: true,
-        defaultValue: null,
-        field: 'sale_price',
       },
       stockQuantity: {
         type: DataTypes.INTEGER.UNSIGNED,

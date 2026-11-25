@@ -4,7 +4,11 @@ import defineUserOtpModel from './userOtp.model.js';
 import defineUserRefreshTokenModel from './userRefreshToken.model.js';
 import defineCategoryModel from './category.model.js';
 import defineProductModel, { PRODUCT_TYPES, PRODUCT_STATUSES } from './product.model.js';
-import defineProductVariantModel from './productVariant.model.js';
+import defineProductVariantModel, {
+  SUPPORTED_MARKETS,
+  SUPPORTED_COUNTRIES,
+  DEFAULT_COUNTRY,
+} from './productVariant.model.js';
 import defineProductMediaModel, { PRODUCT_MEDIA_TYPES } from './productMedia.model.js';
 import defineBannerModel, { BANNER_PLACEMENTS } from './banner.model.js';
 
@@ -81,6 +85,9 @@ export {
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
   BANNER_PLACEMENTS,
+  SUPPORTED_MARKETS,
+  SUPPORTED_COUNTRIES,
+  DEFAULT_COUNTRY,
 };
 
 export default {
@@ -97,4 +104,7 @@ export default {
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
   BANNER_PLACEMENTS,
+  SUPPORTED_MARKETS,
+  SUPPORTED_COUNTRIES,
+  DEFAULT_COUNTRY,
 };

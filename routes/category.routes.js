@@ -1,15 +1,20 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { validateQuery, validateParams } from '../middlewares/validate.middleware.js';
+import {
+  validateQuery,
+  validateParams,
+  optionalBool,
+  countryQueryField,
+} from '../middlewares/validate.middleware.js';
 import * as catalogController from '../controllers/catalog.controller.js';
 
-const optionalBool = z
-  .enum(['true', 'false'])
-  .optional()
-  .transform((val) => (val === undefined ? undefined : val === 'true'));
-
 const listCategoriesQuerySchema = z.object({
+  country: countryQueryField,
   includeEmpty: optionalBool.default(true),
+});
+
+const getCategoryQuerySchema = z.object({
+  country: countryQueryField,
 });
 
 const categorySlugParamsSchema = z.object({
@@ -24,6 +29,11 @@ const categorySlugParamsSchema = z.object({
 const router = Router();
 
 router.get('/', validateQuery(listCategoriesQuerySchema), catalogController.listCategories);
-router.get('/:slug', validateParams(categorySlugParamsSchema), catalogController.getCategoryBySlug);
+router.get(
+  '/:slug',
+  validateParams(categorySlugParamsSchema),
+  validateQuery(getCategoryQuerySchema),
+  catalogController.getCategoryBySlug
+);
 
 export default router;

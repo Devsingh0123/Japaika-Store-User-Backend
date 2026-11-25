@@ -10,7 +10,10 @@ export async function listCategories(req, res) {
 }
 
 export async function getCategoryBySlug(req, res) {
-  const category = await catalogService.getCategoryBySlug(req.validatedParams.slug);
+  const category = await catalogService.getCategoryBySlug(
+    req.validatedParams.slug,
+    req.validatedQuery
+  );
   return sendSuccess(res, {
     message: 'Category retrieved successfully.',
     data: { category },
@@ -20,6 +23,7 @@ export async function getCategoryBySlug(req, res) {
 export async function listProducts(req, res) {
   const q = req.validatedQuery;
   const data = await catalogService.listProducts({
+    country: q.country,
     page: q.page,
     limit: q.limit,
     search: q.search || q.q || undefined,
@@ -41,7 +45,10 @@ export async function listProducts(req, res) {
 }
 
 export async function getProductBySlug(req, res) {
-  const product = await catalogService.getProductBySlug(req.validatedParams.slug);
+  const product = await catalogService.getProductBySlug(
+    req.validatedParams.slug,
+    req.validatedQuery
+  );
   return sendSuccess(res, {
     message: 'Product retrieved successfully.',
     data: { product },

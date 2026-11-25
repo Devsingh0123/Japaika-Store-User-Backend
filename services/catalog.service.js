@@ -7,11 +7,37 @@ import {
   ProductMedia,
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
+  SUPPORTED_MARKETS,
+  DEFAULT_COUNTRY,
 } from '../models/index.js';
 import { AppError } from '../utils/http.js';
 
-const ACTIVE_VARIANT_EXISTS_SQL =
-  'EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = Product.id AND pv.is_active = 1 AND pv.deleted_at IS NULL)';
+function resolveMarket(country = DEFAULT_COUNTRY) {
+  const code = String(country || DEFAULT_COUNTRY).trim().toUpperCase();
+  const market = SUPPORTED_MARKETS[code];
+  if (!market) {
+    throw new AppError(400, 'VALIDATION_ERROR', `Unsupported market country: ${code}`);
+  }
+  return market;
+}
+
+function sqlMarketPrice(country) {
+  return `CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(pv.prices, '$.${country}.price')), 'null') AS DECIMAL(10,2))`;
+}
+
+function sqlMarketSalePrice(country) {
+  return `CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(pv.prices, '$.${country}.salePrice')), 'null') AS DECIMAL(10,2))`;
+}
+
+function sqlMarketEffectivePrice(country) {
+  const priceExpr = sqlMarketPrice(country);
+  const saleExpr = sqlMarketSalePrice(country);
+  return `CASE WHEN ${saleExpr} IS NOT NULL AND ${saleExpr} > 0 AND ${saleExpr} < ${priceExpr} THEN ${saleExpr} ELSE ${priceExpr} END`;
+}
+
+function buildActiveMarketVariantExistsSql(country) {
+  return `EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = Product.id AND pv.is_active = 1 AND pv.deleted_at IS NULL AND ${sqlMarketPrice(country)} > 0)`;
+}
 
 function parseJsonField(value, fallback) {
   if (value === null || value === undefined) return fallback;
@@ -58,7 +84,10 @@ function formatMediaItem(item) {
     mediaUrl: item.mediaUrl,
     thumbnailUrl: item.thumbnailUrl || null,
     mimeType: item.mimeType || null,
-    durationSeconds: item.durationSeconds !== null && item.durationSeconds !== undefined ? Number(item.durationSeconds) : null,
+    durationSeconds:
+      item.durationSeconds !== null && item.durationSeconds !== undefined
+        ? Number(item.durationSeconds)
+        : null,
     altText: item.altText || null,
     isPrimary: Boolean(item.isPrimary),
     sortOrder: item.sortOrder,
@@ -74,11 +103,46 @@ function selectPrimaryMedia(mediaItems) {
   );
 }
 
-function formatVariant(variant) {
-  const priceNum = Number(variant.price);
-  const saleNum = variant.salePrice !== null && variant.salePrice !== undefined ? Number(variant.salePrice) : null;
+function extractMarketPricing(pricesValue, market) {
+  const pricesObj = parseJsonField(pricesValue, null);
+  if (!pricesObj || typeof pricesObj !== 'object') return null;
+
+  const entry = pricesObj[market.country];
+  if (!entry || typeof entry !== 'object') return null;
+
+  const priceNum = Number(entry.price);
+  if (!Number.isFinite(priceNum) || priceNum <= 0) return null;
+
+  if (entry.currency && String(entry.currency).toUpperCase() !== market.currency) {
+    return null;
+  }
+
+  const rawSale =
+    entry.salePrice !== null && entry.salePrice !== undefined && entry.salePrice !== ''
+      ? Number(entry.salePrice)
+      : null;
+  const saleNum =
+    rawSale !== null && Number.isFinite(rawSale) && rawSale > 0 && rawSale < priceNum
+      ? rawSale
+      : null;
   const effectiveNum = saleNum !== null ? saleNum : priceNum;
-  const discountPercent = saleNum !== null && priceNum > 0 ? Math.round(((priceNum - saleNum) / priceNum) * 100) : 0;
+  const discountPercent =
+    saleNum !== null ? Math.round(((priceNum - saleNum) / priceNum) * 100) : 0;
+
+  return {
+    country: market.country,
+    currency: market.currency,
+    priceNum,
+    saleNum,
+    effectiveNum,
+    discountPercent,
+  };
+}
+
+function formatVariant(variant, market) {
+  const marketPrice = extractMarketPricing(variant.prices, market);
+  if (!marketPrice) return null;
+
   const stockQuantity = Number(variant.stockQuantity || 0);
   const inStock = stockQuantity > 0;
   const isLowStock = inStock && stockQuantity <= Number(variant.lowStockThreshold ?? 5);
@@ -88,10 +152,12 @@ function formatVariant(variant) {
     sku: variant.sku,
     title: variant.title || null,
     optionValues: parseJsonField(variant.optionValues, null),
-    price: formatMoney(priceNum),
-    salePrice: saleNum !== null ? formatMoney(saleNum) : null,
-    effectivePrice: formatMoney(effectiveNum),
-    discountPercent,
+    country: marketPrice.country,
+    currency: marketPrice.currency,
+    price: formatMoney(marketPrice.priceNum),
+    salePrice: marketPrice.saleNum !== null ? formatMoney(marketPrice.saleNum) : null,
+    effectivePrice: formatMoney(marketPrice.effectiveNum),
+    discountPercent: marketPrice.discountPercent,
     stockQuantity,
     inStock,
     isLowStock,
@@ -102,7 +168,20 @@ function formatVariant(variant) {
   };
 }
 
-function buildPricingAndAvailability(product, formattedVariants) {
+function formatMarketVariants(rawVariants, market) {
+  const formatted = [...(rawVariants || [])]
+    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.sortOrder - b.sortOrder)
+    .map((v) => formatVariant(v, market))
+    .filter(Boolean);
+
+  if (formatted.length > 0 && !formatted.some((v) => v.isDefault)) {
+    formatted[0].isDefault = true;
+  }
+
+  return formatted;
+}
+
+function buildPricingAndAvailability(product, formattedVariants, market) {
   const defaultVariant = formattedVariants.find((v) => v.isDefault) || formattedVariants[0];
   const effectivePrices = formattedVariants.map((v) => Number(v.effectivePrice));
   const minPrice = Math.min(...effectivePrices);
@@ -113,13 +192,15 @@ function buildPricingAndAvailability(product, formattedVariants) {
   return {
     defaultVariantId: defaultVariant.id,
     pricing: {
+      country: market.country,
+      currency: market.currency,
       price: defaultVariant.price,
       salePrice: defaultVariant.salePrice,
       effectivePrice: defaultVariant.effectivePrice,
       minPrice: formatMoney(minPrice),
       maxPrice: formatMoney(maxPrice),
       discountPercent: defaultVariant.discountPercent,
-      gstInclusive: true,
+      gstInclusive: market.country === 'IN',
       gstRate: formatMoney(product.gstRate),
     },
     availability: {
@@ -160,10 +241,6 @@ function formatShipping(product) {
   };
 }
 
-/**
- * Loads all customer-visible active categories (root categories and active
- * subcategories whose parent category is also active and non-deleted).
- */
 async function loadVisibleCategories() {
   const rows = await Category.findAll({
     where: { isActive: true },
@@ -197,7 +274,7 @@ async function loadVisibleCategories() {
   };
 }
 
-async function getActiveProductCountsByCategory(visibleIds) {
+async function getActiveProductCountsByCategory(visibleIds, country) {
   const counts = new Map();
   if (!visibleIds.length) return counts;
 
@@ -209,7 +286,7 @@ async function getActiveProductCountsByCategory(visibleIds) {
     where: {
       status: PRODUCT_STATUSES.ACTIVE,
       categoryId: { [Op.in]: visibleIds },
-      [Op.and]: [sequelize.literal(ACTIVE_VARIANT_EXISTS_SQL)],
+      [Op.and]: [sequelize.literal(buildActiveMarketVariantExistsSql(country))],
     },
     group: ['category_id'],
     raw: true,
@@ -224,9 +301,10 @@ async function getActiveProductCountsByCategory(visibleIds) {
 
 // --- Public Customer Category Services ---
 
-export async function listCategories({ includeEmpty = true } = {}) {
+export async function listCategories({ includeEmpty = true, country = DEFAULT_COUNTRY } = {}) {
+  const market = resolveMarket(country);
   const { roots, subsByParent, visibleIds } = await loadVisibleCategories();
-  const directCounts = await getActiveProductCountsByCategory(visibleIds);
+  const directCounts = await getActiveProductCountsByCategory(visibleIds, market.country);
 
   const items = [];
 
@@ -268,7 +346,8 @@ export async function listCategories({ includeEmpty = true } = {}) {
   return { items };
 }
 
-export async function getCategoryBySlug(slug) {
+export async function getCategoryBySlug(slug, { country = DEFAULT_COUNTRY } = {}) {
+  const market = resolveMarket(country);
   const normalizedSlug = String(slug).trim().toLowerCase();
   const { rootMap, subsByParent, visibleBySlug, visibleIds } = await loadVisibleCategories();
   const category = visibleBySlug.get(normalizedSlug);
@@ -277,7 +356,7 @@ export async function getCategoryBySlug(slug) {
     throw new AppError(404, 'CATEGORY_NOT_FOUND', 'Category not found.');
   }
 
-  const directCounts = await getActiveProductCountsByCategory(visibleIds);
+  const directCounts = await getActiveProductCountsByCategory(visibleIds, market.country);
 
   if (!category.parentId) {
     const rawSubs = subsByParent.get(category.id) || [];
@@ -330,6 +409,7 @@ export async function getCategoryBySlug(slug) {
 // --- Public Customer Product Services ---
 
 export async function listProducts({
+  country = DEFAULT_COUNTRY,
   page = 1,
   limit = 12,
   search,
@@ -343,6 +423,7 @@ export async function listProducts({
   maxPrice,
   sort = 'newest',
 } = {}) {
+  const market = resolveMarket(country);
   const { rootMap, subsByParent, visibleById, visibleBySlug, visibleIds } = await loadVisibleCategories();
 
   const emptyResult = {
@@ -377,7 +458,33 @@ export async function listProducts({
     }
   }
 
-  const andConditions = [sequelize.literal(ACTIVE_VARIANT_EXISTS_SQL)];
+  const priceExpr = sqlMarketPrice(market.country);
+  const saleExpr = sqlMarketSalePrice(market.country);
+  const effectiveExpr = sqlMarketEffectivePrice(market.country);
+
+  const variantFilterClauses = [
+    'pv.product_id = Product.id',
+    'pv.is_active = 1',
+    'pv.deleted_at IS NULL',
+    `${priceExpr} > 0`,
+  ];
+
+  if (inStock === true) {
+    variantFilterClauses.push('pv.stock_quantity > 0');
+  }
+  if (onSale === true) {
+    variantFilterClauses.push(`${saleExpr} IS NOT NULL AND ${saleExpr} > 0 AND ${saleExpr} < ${priceExpr}`);
+  }
+  if (minPrice !== undefined) {
+    variantFilterClauses.push(`${effectiveExpr} >= ${Number(minPrice)}`);
+  }
+  if (maxPrice !== undefined) {
+    variantFilterClauses.push(`${effectiveExpr} <= ${Number(maxPrice)}`);
+  }
+
+  const andConditions = [
+    sequelize.literal(`EXISTS (SELECT 1 FROM product_variants pv WHERE ${variantFilterClauses.join(' AND ')})`),
+  ];
 
   const where = {
     status: PRODUCT_STATUSES.ACTIVE,
@@ -402,41 +509,15 @@ export async function listProducts({
         { description: { [Op.like]: pattern } },
         { slug: { [Op.like]: pattern } },
         sequelize.literal(
-          `EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = Product.id AND pv.is_active = 1 AND pv.deleted_at IS NULL AND pv.sku LIKE ${escapedPattern})`
+          `EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = Product.id AND pv.is_active = 1 AND pv.deleted_at IS NULL AND ${priceExpr} > 0 AND pv.sku LIKE ${escapedPattern})`
         ),
       ],
     });
   }
 
-  const variantFilterClauses = [
-    'pv.product_id = Product.id',
-    'pv.is_active = 1',
-    'pv.deleted_at IS NULL',
-  ];
-
-  if (inStock === true) {
-    variantFilterClauses.push('pv.stock_quantity > 0');
-  }
-  if (onSale === true) {
-    variantFilterClauses.push('pv.sale_price IS NOT NULL');
-  }
-  if (minPrice !== undefined) {
-    variantFilterClauses.push(`COALESCE(pv.sale_price, pv.price) >= ${Number(minPrice)}`);
-  }
-  if (maxPrice !== undefined) {
-    variantFilterClauses.push(`COALESCE(pv.sale_price, pv.price) <= ${Number(maxPrice)}`);
-  }
-
-  if (variantFilterClauses.length > 3) {
-    andConditions.push(
-      sequelize.literal(`EXISTS (SELECT 1 FROM product_variants pv WHERE ${variantFilterClauses.join(' AND ')})`)
-    );
-  }
-
   where[Op.and] = andConditions;
 
-  const minEffectivePriceExpr =
-    '(SELECT MIN(COALESCE(pv.sale_price, pv.price)) FROM product_variants pv WHERE pv.product_id = Product.id AND pv.is_active = 1 AND pv.deleted_at IS NULL)';
+  const minEffectivePriceExpr = `(SELECT MIN(${effectiveExpr}) FROM product_variants pv WHERE pv.product_id = Product.id AND pv.is_active = 1 AND pv.deleted_at IS NULL AND ${priceExpr} > 0)`;
 
   let order;
   switch (sort) {
@@ -518,9 +599,8 @@ export async function listProducts({
     .map((id) => productById.get(id))
     .filter(Boolean)
     .map((product) => {
-      const sortedVariants = [...(product.variants || [])]
-        .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.sortOrder - b.sortOrder)
-        .map(formatVariant);
+      const sortedVariants = formatMarketVariants(product.variants, market);
+      if (!sortedVariants.length) return null;
 
       const sortedMedia = [...(product.media || [])]
         .sort(
@@ -532,7 +612,7 @@ export async function listProducts({
         .map(formatMediaItem);
 
       const primaryMedia = selectPrimaryMedia(sortedMedia);
-      const { pricing, availability } = buildPricingAndAvailability(product, sortedVariants);
+      const { pricing, availability } = buildPricingAndAvailability(product, sortedVariants, market);
       const cat = visibleById.get(product.categoryId);
 
       return {
@@ -549,7 +629,8 @@ export async function listProducts({
         hasCertificate: Boolean(product.certificateUrl),
         publishedAt: product.publishedAt || null,
       };
-    });
+    })
+    .filter(Boolean);
 
   return {
     items,
@@ -562,7 +643,8 @@ export async function listProducts({
   };
 }
 
-export async function getProductBySlug(slug) {
+export async function getProductBySlug(slug, { country = DEFAULT_COUNTRY } = {}) {
+  const market = resolveMarket(country);
   const normalizedSlug = String(slug).trim().toLowerCase();
   const { rootMap, visibleById, visibleIds } = await loadVisibleCategories();
 
@@ -595,9 +677,10 @@ export async function getProductBySlug(slug) {
     throw new AppError(404, 'PRODUCT_NOT_FOUND', 'Product not found.');
   }
 
-  const variants = [...product.variants]
-    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.sortOrder - b.sortOrder)
-    .map(formatVariant);
+  const variants = formatMarketVariants(product.variants, market);
+  if (!variants.length) {
+    throw new AppError(404, 'PRODUCT_NOT_FOUND', 'Product not found.');
+  }
 
   const media = [...(product.media || [])]
     .sort(
@@ -608,7 +691,11 @@ export async function getProductBySlug(slug) {
     )
     .map(formatMediaItem);
 
-  const { defaultVariantId, pricing, availability } = buildPricingAndAvailability(product, variants);
+  const { defaultVariantId, pricing, availability } = buildPricingAndAvailability(
+    product,
+    variants,
+    market
+  );
   const category = visibleById.get(product.categoryId);
 
   return {
@@ -628,7 +715,7 @@ export async function getProductBySlug(slug) {
     media,
     certificate: formatCertificate(product),
     tax: {
-      gstInclusive: true,
+      gstInclusive: market.country === 'IN',
       gstRate: formatMoney(product.gstRate),
       hsnCode: product.hsnCode || null,
     },

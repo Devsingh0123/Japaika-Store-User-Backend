@@ -1,4 +1,17 @@
+import { z } from 'zod';
+import { SUPPORTED_COUNTRIES, DEFAULT_COUNTRY } from '../models/index.js';
 import { AppError } from '../utils/http.js';
+
+export const optionalBool = z
+  .enum(['true', 'false'])
+  .optional()
+  .transform((val) => (val === undefined ? undefined : val === 'true'));
+
+export const countryQueryField = z
+  .preprocess(
+    (val) => (typeof val === 'string' && val.trim() !== '' ? val.trim().toUpperCase() : val),
+    z.enum(SUPPORTED_COUNTRIES).default(DEFAULT_COUNTRY)
+  );
 
 function formatIssues(issues, fallbackField) {
   return issues.map((issue) => ({

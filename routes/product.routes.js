@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { validateQuery, validateParams } from '../middlewares/validate.middleware.js';
+import {
+  validateQuery,
+  validateParams,
+  optionalBool,
+  countryQueryField,
+} from '../middlewares/validate.middleware.js';
 import * as catalogController from '../controllers/catalog.controller.js';
-
-const optionalBool = z
-  .enum(['true', 'false'])
-  .optional()
-  .transform((val) => (val === undefined ? undefined : val === 'true'));
 
 const optionalNonNegativeNumber = z
   .string()
@@ -19,6 +19,7 @@ const optionalNonNegativeNumber = z
 
 const listProductsQuerySchema = z
   .object({
+    country: countryQueryField,
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(48).default(12),
     search: z.string().trim().max(120).optional(),
@@ -47,6 +48,10 @@ const listProductsQuerySchema = z
     }
   );
 
+const getProductQuerySchema = z.object({
+  country: countryQueryField,
+});
+
 const productSlugParamsSchema = z.object({
   slug: z
     .string()
@@ -59,6 +64,11 @@ const productSlugParamsSchema = z.object({
 const router = Router();
 
 router.get('/', validateQuery(listProductsQuerySchema), catalogController.listProducts);
-router.get('/:slug', validateParams(productSlugParamsSchema), catalogController.getProductBySlug);
+router.get(
+  '/:slug',
+  validateParams(productSlugParamsSchema),
+  validateQuery(getProductQuerySchema),
+  catalogController.getProductBySlug
+);
 
 export default router;
