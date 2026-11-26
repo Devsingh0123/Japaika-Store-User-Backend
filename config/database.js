@@ -1,7 +1,10 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { Sequelize } from 'sequelize';
 
-dotenv.config({ quiet: true });
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(currentDir, '../.env'), quiet: true });
 
 const sequelize = new Sequelize(
   process.env.DB_NAME || 'japaika_ecommerce',

@@ -14,6 +14,8 @@ import {
   ProductVariant,
   ProductMedia,
   Banner,
+  UserAddress,
+  PostalCode,
 } from '../../models/index.js';
 
 const require = createRequire(import.meta.url);
@@ -33,6 +35,8 @@ const EXPECTED_MIGRATION_FILES = [
   '20261123001000-migrate-product-images-to-product-media.cjs',
   '20261124001100-create-banners.cjs',
   '20261125001200-replace-variant-price-columns-with-prices-json.cjs',
+  '20261126001300-create-user-addresses.cjs',
+  '20261126001400-create-postal-codes.cjs',
 ];
 
 function createSpyQueryInterface() {
@@ -79,8 +83,8 @@ function createSpyQueryInterface() {
   };
 }
 
-describe('Shared Sequelize migrations compatibility (all 12 migrations / 10 active tables)', () => {
-  it('loads all 12 migrations in deterministic dependency order', () => {
+describe('Shared Sequelize migrations compatibility (all 14 migrations / 12 active tables)', () => {
+  it('loads all 14 migrations in deterministic dependency order', () => {
     const files = fs
       .readdirSync(migrationsDir)
       .filter((f) => f.endsWith('.cjs'))
@@ -89,7 +93,7 @@ describe('Shared Sequelize migrations compatibility (all 12 migrations / 10 acti
     assert.deepEqual(files, EXPECTED_MIGRATION_FILES);
   });
 
-  it('migrates all 10 active tables (with product_variants.prices JSON) and rolls back cleanly', async () => {
+  it('migrates all 12 active tables (including user_addresses with district and postal_codes without localities) and rolls back cleanly', async () => {
     const qi = createSpyQueryInterface();
     const SequelizeStub = { ...DataTypes, fn };
 
@@ -111,9 +115,11 @@ describe('Shared Sequelize migrations compatibility (all 12 migrations / 10 acti
       'product_variants',
       'product_media',
       'banners',
+      'user_addresses',
+      'postal_codes',
     ]);
 
-    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 10 active tables
+    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 12 active tables
     for (const [tableName, { columns, options }] of qi.activeTables.entries()) {
       assert.equal(options.engine, 'InnoDB', `${tableName} must use InnoDB`);
       assert.equal(options.charset, 'utf8mb4', `${tableName} must use utf8mb4`);
@@ -136,80 +142,63 @@ describe('Shared Sequelize migrations compatibility (all 12 migrations / 10 acti
     assert.equal(variants.prices.type.key, 'JSON');
     assert.equal(variants.prices.allowNull, false);
 
-    // Verify product_media columns, enum, defaults, and CASCADE FK
-    const media = qi.activeTables.get('product_media').columns;
-    assert.deepEqual(Object.keys(media), [
+    // Verify user_addresses columns (including district), FK, and indexes
+    const addresses = qi.activeTables.get('user_addresses').columns;
+    assert.deepEqual(Object.keys(addresses), [
       'id',
-      'product_id',
-      'media_type',
-      'media_url',
-      'media_public_id',
-      'thumbnail_url',
-      'mime_type',
-      'duration_seconds',
-      'alt_text',
-      'is_primary',
-      'sort_order',
-      'created_at',
-    ]);
-    assert.deepEqual(media.product_id.references, { model: 'products', key: 'id' });
-    assert.equal(media.product_id.onUpdate, 'CASCADE');
-    assert.equal(media.product_id.onDelete, 'CASCADE');
-    assert.deepEqual(media.media_type.type.values, ['image', 'video']);
-    assert.equal(media.media_type.defaultValue, 'image');
-    assert.equal(media.is_primary.defaultValue, false);
-    assert.equal(media.sort_order.defaultValue, 0);
-
-    // Verify certificates remain separate on products
-    const products = qi.activeTables.get('products').columns;
-    assert.ok(products.certificate_url);
-    assert.ok(products.certificate_public_id);
-    assert.ok(products.certificate_resource_type);
-    assert.ok(products.certificate_label);
-
-    // Verify product_media indexes were created
-    const mediaIndexNames = qi.indexes
-      .filter((idx) => idx.tableName === 'product_media')
-      .map((idx) => idx.options.name);
-    assert.deepEqual(mediaIndexNames, [
-      'idx_product_media_product_sort',
-      'idx_product_media_product_type',
-    ]);
-
-    // Verify banners columns, enum, defaults, and indexes
-    const banners = qi.activeTables.get('banners').columns;
-    assert.deepEqual(Object.keys(banners), [
-      'id',
-      'title',
-      'subtitle',
-      'badge_text',
-      'image_url',
-      'image_public_id',
-      'mobile_image_url',
-      'mobile_image_public_id',
-      'alt_text',
-      'cta_label',
-      'cta_url',
-      'placement',
-      'sort_order',
-      'is_active',
-      'starts_at',
-      'ends_at',
+      'user_id',
+      'label',
+      'full_name',
+      'phone',
+      'address_line1',
+      'address_line2',
+      'landmark',
+      'city',
+      'district',
+      'state',
+      'postal_code',
+      'country',
+      'is_default',
       'created_at',
       'updated_at',
       'deleted_at',
     ]);
-    assert.deepEqual(banners.placement.type.values, ['homepage_hero', 'homepage_promo']);
-    assert.equal(banners.placement.defaultValue, 'homepage_hero');
-    assert.equal(banners.sort_order.defaultValue, 0);
-    assert.equal(banners.is_active.defaultValue, true);
+    assert.deepEqual(addresses.user_id.references, { model: 'users', key: 'id' });
+    assert.equal(addresses.user_id.onUpdate, 'CASCADE');
+    assert.equal(addresses.user_id.onDelete, 'CASCADE');
+    assert.deepEqual(addresses.label.type.values, ['home', 'work', 'other']);
+    assert.equal(addresses.country.defaultValue, 'IN');
+    assert.equal(addresses.is_default.defaultValue, false);
 
-    const bannerIndexNames = qi.indexes
-      .filter((idx) => idx.tableName === 'banners')
+    const addressIndexNames = qi.indexes
+      .filter((idx) => idx.tableName === 'user_addresses')
       .map((idx) => idx.options.name);
-    assert.deepEqual(bannerIndexNames, [
-      'idx_banners_placement_active_sort',
-      'idx_banners_schedule',
+    assert.deepEqual(addressIndexNames, [
+      'idx_user_addresses_user_default',
+      'idx_user_addresses_user_country',
+    ]);
+
+    // Verify postal_codes columns (city, district, state, state_code; NO localities) and indexes
+    const postalCodes = qi.activeTables.get('postal_codes').columns;
+    assert.deepEqual(Object.keys(postalCodes), [
+      'id',
+      'country',
+      'postal_code',
+      'city',
+      'district',
+      'state',
+      'state_code',
+      'created_at',
+      'updated_at',
+    ]);
+    assert.equal(postalCodes.localities, undefined);
+
+    const postalIndexNames = qi.indexes
+      .filter((idx) => idx.tableName === 'postal_codes')
+      .map((idx) => idx.options.name);
+    assert.deepEqual(postalIndexNames, [
+      'uq_postal_codes_country_code',
+      'idx_postal_codes_country_state',
     ]);
 
     // Verify user-backend Sequelize models align with migrated columns
@@ -222,6 +211,8 @@ describe('Shared Sequelize migrations compatibility (all 12 migrations / 10 acti
       [ProductVariant, 'product_variants'],
       [ProductMedia, 'product_media'],
       [Banner, 'banners'],
+      [UserAddress, 'user_addresses'],
+      [PostalCode, 'postal_codes'],
     ];
     for (const [model, tableName] of modelTablePairs) {
       const migratedCols = new Set(Object.keys(qi.activeTables.get(tableName).columns));

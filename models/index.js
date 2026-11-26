@@ -11,6 +11,11 @@ import defineProductVariantModel, {
 } from './productVariant.model.js';
 import defineProductMediaModel, { PRODUCT_MEDIA_TYPES } from './productMedia.model.js';
 import defineBannerModel, { BANNER_PLACEMENTS } from './banner.model.js';
+import defineUserAddressModel, {
+  ADDRESS_LABELS,
+  ADDRESS_COUNTRY_RULES,
+} from './userAddress.model.js';
+import definePostalCodeModel from './postalCode.model.js';
 
 const User = defineUserModel(sequelize);
 const UserOtp = defineUserOtpModel(sequelize);
@@ -20,6 +25,8 @@ const Product = defineProductModel(sequelize);
 const ProductVariant = defineProductVariantModel(sequelize);
 const ProductMedia = defineProductMediaModel(sequelize);
 const Banner = defineBannerModel(sequelize);
+const UserAddress = defineUserAddressModel(sequelize);
+const PostalCode = definePostalCodeModel(sequelize);
 
 User.hasMany(UserRefreshToken, {
   foreignKey: 'user_id',
@@ -28,6 +35,16 @@ User.hasMany(UserRefreshToken, {
 
 UserRefreshToken.belongsTo(User, {
   foreignKey: 'user_id',
+  as: 'user',
+});
+
+User.hasMany(UserAddress, {
+  foreignKey: { name: 'userId', field: 'user_id' },
+  as: 'addresses',
+});
+
+UserAddress.belongsTo(User, {
+  foreignKey: { name: 'userId', field: 'user_id' },
   as: 'user',
 });
 
@@ -81,6 +98,8 @@ export {
   ProductVariant,
   ProductMedia,
   Banner,
+  UserAddress,
+  PostalCode,
   PRODUCT_TYPES,
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
@@ -88,6 +107,8 @@ export {
   SUPPORTED_MARKETS,
   SUPPORTED_COUNTRIES,
   DEFAULT_COUNTRY,
+  ADDRESS_LABELS,
+  ADDRESS_COUNTRY_RULES,
 };
 
 export default {
@@ -100,6 +121,8 @@ export default {
   ProductVariant,
   ProductMedia,
   Banner,
+  UserAddress,
+  PostalCode,
   PRODUCT_TYPES,
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
@@ -107,4 +130,6 @@ export default {
   SUPPORTED_MARKETS,
   SUPPORTED_COUNTRIES,
   DEFAULT_COUNTRY,
+  ADDRESS_LABELS,
+  ADDRESS_COUNTRY_RULES,
 };

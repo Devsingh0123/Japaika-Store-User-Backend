@@ -35,6 +35,13 @@ Customer-facing REST API for the standalone Japaika E-commerce platform, built w
    - `20261123001000-migrate-product-images-to-product-media.cjs` (`product_media` — unified images & short videos)
    - `20261124001100-create-banners.cjs` (`banners` — dynamic homepage hero & promo banners)
    - `20261125001200-replace-variant-price-columns-with-prices-json.cjs` (`product_variants.prices` — regional `IN`/`INR` & `US`/`USD` JSON pricing)
+   - `20261126001300-create-user-addresses.cjs` (`user_addresses` — customer shipping address book with `city`, `district`, `state`)
+   - `20261126001400-create-postal-codes.cjs` (`postal_codes` — self-hosted MySQL postal directory for `city`, `district`, `state` auto-fill)
+
+   To import verified postal code datasets (`.json`, `.csv`, or `.tsv`) into `postal_codes`:
+   ```bash
+   node utils/importPostalCodes.js <path-to-dataset> [--country=IN]
+   ```
 
    Other migration commands:
    - `npm run migrate:status` — Inspect applied/pending migrations
@@ -76,3 +83,12 @@ npm test
 | `GET` | `/api/v1/products` | Public | Paginated catalog listing with regional pricing (`?country=IN\|US`), search (`search`/`q`), category, stock, sale, price range, and sort |
 | `GET` | `/api/v1/products/:slug` | Public | Full customer-safe product detail (`?country=IN\|US`, regional variant pricing, shared stock, unified image+video media, certificate, specs, shipping, SEO) |
 | `GET` | `/api/v1/banners` | Public | List active, in-schedule homepage banners (`?placement=homepage_hero\|homepage_promo&limit=10`) |
+| `GET` | `/api/v1/profile` | Access Cookie | Get authenticated customer profile + current `defaultAddress` |
+| `PATCH` | `/api/v1/profile` | Access Cookie | Update customer `fullName` and/or `phone` |
+| `GET` | `/api/v1/addresses/lookup` | Public | Self-hosted MySQL postal code lookup (`?country=IN\|US&postalCode=...`) returning `city`, `district`, `state`, `stateCode` |
+| `GET` | `/api/v1/addresses` | Access Cookie | List saved customer addresses (`?country=IN\|US`, ordered by `isDefault DESC`) |
+| `GET` | `/api/v1/addresses/:id` | Access Cookie | Get a single owned customer address |
+| `POST` | `/api/v1/addresses` | Access Cookie | Create a customer address (auto-fills `city`/`district`/`state` or accepts manual entry) |
+| `PATCH` | `/api/v1/addresses/:id` | Access Cookie | Update an owned customer address |
+| `PATCH` | `/api/v1/addresses/:id/default` | Access Cookie | Designate an owned address as the customer's default shipping address |
+| `DELETE` | `/api/v1/addresses/:id` | Access Cookie | Soft-delete an owned address (auto-promotes next most recent address if default) |
