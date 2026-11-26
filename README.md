@@ -93,3 +93,5 @@ npm test
 | `PATCH` | `/api/v1/addresses/:id` | Access Cookie | Update an owned customer address |
 | `PATCH` | `/api/v1/addresses/:id/default` | Access Cookie | Designate an owned address as the customer's default shipping address |
 | `DELETE` | `/api/v1/addresses/:id` | Access Cookie | Soft-delete an owned address (auto-promotes next most recent address if default) |
+| `GET` | `/api/v1/coupons` | Public | List active, non-expired, non-exhausted `public` coupons (`?country=IN\|US`) |
+| `POST` | `/api/v1/coupons/validate` | Public | Validate Browser-First Cart items (live regional prices & stock) and optional `public` or `hidden` `couponCode` |

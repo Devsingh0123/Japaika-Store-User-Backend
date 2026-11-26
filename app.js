@@ -9,6 +9,7 @@ import productRoutes from './routes/product.routes.js';
 import bannerRoutes from './routes/banner.routes.js';
 import profileRoutes from './routes/profile.routes.js';
 import addressRoutes from './routes/address.routes.js';
+import couponRoutes from './routes/coupon.routes.js';
 import { notFoundHandler, errorHandler } from './middlewares/error.middleware.js';
 import { sendSuccess, sendError } from './utils/http.js';
 
@@ -51,6 +52,7 @@ app.use('/api/v1/products', productRoutes);
 app.use('/api/v1/banners', bannerRoutes);
 app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/addresses', addressRoutes);
+app.use('/api/v1/coupons', couponRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

@@ -103,7 +103,7 @@ function selectPrimaryMedia(mediaItems) {
   );
 }
 
-function extractMarketPricing(pricesValue, market) {
+export function extractMarketPricing(pricesValue, market) {
   const pricesObj = parseJsonField(pricesValue, null);
   if (!pricesObj || typeof pricesObj !== 'object') return null;
 
@@ -241,7 +241,7 @@ function formatShipping(product) {
   };
 }
 
-async function loadVisibleCategories() {
+export async function loadVisibleCategories() {
   const rows = await Category.findAll({
     where: { isActive: true },
     order: [
