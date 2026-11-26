@@ -37,6 +37,7 @@ Customer-facing REST API for the standalone Japaika E-commerce platform, built w
    - `20261125001200-replace-variant-price-columns-with-prices-json.cjs` (`product_variants.prices` — regional `IN`/`INR` & `US`/`USD` JSON pricing)
    - `20261126001300-create-user-addresses.cjs` (`user_addresses` — customer shipping address book with `city`, `district`, `state`)
    - `20261126001400-create-postal-codes.cjs` (`postal_codes` — self-hosted MySQL postal directory for `city`, `district`, `state` auto-fill)
+   - `20261126001500-create-coupons.cjs` (`coupons` — regional `INR`/`USD` percentage discount coupons with `public`/`hidden` visibility)
 
    To import verified postal code datasets (`.json`, `.csv`, or `.tsv`) into `postal_codes`:
    ```bash

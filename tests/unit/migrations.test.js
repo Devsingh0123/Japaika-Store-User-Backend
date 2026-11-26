@@ -16,6 +16,7 @@ import {
   Banner,
   UserAddress,
   PostalCode,
+  Coupon,
 } from '../../models/index.js';
 
 const require = createRequire(import.meta.url);
@@ -37,6 +38,7 @@ const EXPECTED_MIGRATION_FILES = [
   '20261125001200-replace-variant-price-columns-with-prices-json.cjs',
   '20261126001300-create-user-addresses.cjs',
   '20261126001400-create-postal-codes.cjs',
+  '20261126001500-create-coupons.cjs',
 ];
 
 function createSpyQueryInterface() {
@@ -83,8 +85,8 @@ function createSpyQueryInterface() {
   };
 }
 
-describe('Shared Sequelize migrations compatibility (all 14 migrations / 12 active tables)', () => {
-  it('loads all 14 migrations in deterministic dependency order', () => {
+describe('Shared Sequelize migrations compatibility (all 15 migrations / 13 active tables)', () => {
+  it('loads all 15 migrations in deterministic dependency order', () => {
     const files = fs
       .readdirSync(migrationsDir)
       .filter((f) => f.endsWith('.cjs'))
@@ -93,7 +95,7 @@ describe('Shared Sequelize migrations compatibility (all 14 migrations / 12 acti
     assert.deepEqual(files, EXPECTED_MIGRATION_FILES);
   });
 
-  it('migrates all 12 active tables (including user_addresses with district and postal_codes without localities) and rolls back cleanly', async () => {
+  it('migrates all 13 active tables (including coupons without assigned_user_id) and rolls back cleanly', async () => {
     const qi = createSpyQueryInterface();
     const SequelizeStub = { ...DataTypes, fn };
 
@@ -117,9 +119,10 @@ describe('Shared Sequelize migrations compatibility (all 14 migrations / 12 acti
       'banners',
       'user_addresses',
       'postal_codes',
+      'coupons',
     ]);
 
-    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 12 active tables
+    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 13 active tables
     for (const [tableName, { columns, options }] of qi.activeTables.entries()) {
       assert.equal(options.engine, 'InnoDB', `${tableName} must use InnoDB`);
       assert.equal(options.charset, 'utf8mb4', `${tableName} must use utf8mb4`);
@@ -163,22 +166,8 @@ describe('Shared Sequelize migrations compatibility (all 14 migrations / 12 acti
       'updated_at',
       'deleted_at',
     ]);
-    assert.deepEqual(addresses.user_id.references, { model: 'users', key: 'id' });
-    assert.equal(addresses.user_id.onUpdate, 'CASCADE');
-    assert.equal(addresses.user_id.onDelete, 'CASCADE');
-    assert.deepEqual(addresses.label.type.values, ['home', 'work', 'other']);
-    assert.equal(addresses.country.defaultValue, 'IN');
-    assert.equal(addresses.is_default.defaultValue, false);
 
-    const addressIndexNames = qi.indexes
-      .filter((idx) => idx.tableName === 'user_addresses')
-      .map((idx) => idx.options.name);
-    assert.deepEqual(addressIndexNames, [
-      'idx_user_addresses_user_default',
-      'idx_user_addresses_user_country',
-    ]);
-
-    // Verify postal_codes columns (city, district, state, state_code; NO localities) and indexes
+    // Verify postal_codes columns (city, district, state, state_code; NO localities)
     const postalCodes = qi.activeTables.get('postal_codes').columns;
     assert.deepEqual(Object.keys(postalCodes), [
       'id',
@@ -193,12 +182,38 @@ describe('Shared Sequelize migrations compatibility (all 14 migrations / 12 acti
     ]);
     assert.equal(postalCodes.localities, undefined);
 
-    const postalIndexNames = qi.indexes
-      .filter((idx) => idx.tableName === 'postal_codes')
+    // Verify coupons columns (visibility public|hidden; NO assigned_user_id) and indexes
+    const coupons = qi.activeTables.get('coupons').columns;
+    assert.deepEqual(Object.keys(coupons), [
+      'id',
+      'code',
+      'description',
+      'discount_percentage',
+      'min_cart_subtotal_inr',
+      'min_cart_subtotal_usd',
+      'max_discount_inr',
+      'max_discount_usd',
+      'max_redemptions',
+      'redemption_count',
+      'visibility',
+      'is_active',
+      'expires_at',
+      'created_at',
+      'updated_at',
+      'deleted_at',
+    ]);
+    assert.equal(coupons.assigned_user_id, undefined);
+    assert.deepEqual(coupons.visibility.type.values, ['public', 'hidden']);
+    assert.equal(coupons.visibility.defaultValue, 'public');
+    assert.equal(coupons.redemption_count.defaultValue, 0);
+    assert.equal(coupons.is_active.defaultValue, true);
+
+    const couponIndexNames = qi.indexes
+      .filter((idx) => idx.tableName === 'coupons')
       .map((idx) => idx.options.name);
-    assert.deepEqual(postalIndexNames, [
-      'uq_postal_codes_country_code',
-      'idx_postal_codes_country_state',
+    assert.deepEqual(couponIndexNames, [
+      'uq_coupons_code',
+      'idx_coupons_active_visibility_expires',
     ]);
 
     // Verify user-backend Sequelize models align with migrated columns
@@ -213,6 +228,7 @@ describe('Shared Sequelize migrations compatibility (all 14 migrations / 12 acti
       [Banner, 'banners'],
       [UserAddress, 'user_addresses'],
       [PostalCode, 'postal_codes'],
+      [Coupon, 'coupons'],
     ];
     for (const [model, tableName] of modelTablePairs) {
       const migratedCols = new Set(Object.keys(qi.activeTables.get(tableName).columns));

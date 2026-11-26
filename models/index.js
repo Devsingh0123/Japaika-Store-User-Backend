@@ -16,6 +16,10 @@ import defineUserAddressModel, {
   ADDRESS_COUNTRY_RULES,
 } from './userAddress.model.js';
 import definePostalCodeModel from './postalCode.model.js';
+import defineCouponModel, {
+  COUPON_VISIBILITIES,
+  ALL_COUPON_VISIBILITIES,
+} from './coupon.model.js';
 
 const User = defineUserModel(sequelize);
 const UserOtp = defineUserOtpModel(sequelize);
@@ -27,6 +31,7 @@ const ProductMedia = defineProductMediaModel(sequelize);
 const Banner = defineBannerModel(sequelize);
 const UserAddress = defineUserAddressModel(sequelize);
 const PostalCode = definePostalCodeModel(sequelize);
+const Coupon = defineCouponModel(sequelize);
 
 User.hasMany(UserRefreshToken, {
   foreignKey: 'user_id',
@@ -100,6 +105,7 @@ export {
   Banner,
   UserAddress,
   PostalCode,
+  Coupon,
   PRODUCT_TYPES,
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
@@ -109,6 +115,8 @@ export {
   DEFAULT_COUNTRY,
   ADDRESS_LABELS,
   ADDRESS_COUNTRY_RULES,
+  COUPON_VISIBILITIES,
+  ALL_COUPON_VISIBILITIES,
 };
 
 export default {
@@ -123,6 +131,7 @@ export default {
   Banner,
   UserAddress,
   PostalCode,
+  Coupon,
   PRODUCT_TYPES,
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
@@ -132,4 +141,6 @@ export default {
   DEFAULT_COUNTRY,
   ADDRESS_LABELS,
   ADDRESS_COUNTRY_RULES,
+  COUPON_VISIBILITIES,
+  ALL_COUPON_VISIBILITIES,
 };
