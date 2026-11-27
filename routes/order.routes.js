@@ -34,6 +34,10 @@ const cancelOrderBodySchema = z.object({
     .optional(),
 });
 
+const invoicePdfQuerySchema = z.object({
+  disposition: z.enum(['attachment', 'inline']).default('attachment'),
+});
+
 const router = Router();
 
 router.use(requireCustomerAuth);
@@ -43,6 +47,17 @@ router.get(
   '/:orderNumber',
   validateParams(orderNumberParamsSchema),
   checkoutController.getOrderByNumber
+);
+router.get(
+  '/:orderNumber/invoice',
+  validateParams(orderNumberParamsSchema),
+  checkoutController.getOrderInvoice
+);
+router.get(
+  '/:orderNumber/invoice/pdf',
+  validateParams(orderNumberParamsSchema),
+  validateQuery(invoicePdfQuerySchema),
+  checkoutController.downloadOrderInvoicePdf
 );
 router.post(
   '/:orderNumber/retry-payment',

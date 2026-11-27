@@ -45,6 +45,7 @@ const EXPECTED_MIGRATION_FILES = [
   '20261127001600-create-shipping-settings.cjs',
   '20261127001700-create-orders.cjs',
   '20261127001800-create-order-items.cjs',
+  '20261127001900-add-invoice-numbering.cjs',
 ];
 
 function createSpyQueryInterface() {
@@ -86,6 +87,12 @@ function createSpyQueryInterface() {
     async addIndex(tableName, fields, options) {
       indexes.push({ tableName, fields, options });
     },
+    async removeIndex(tableName, indexName) {
+      const idx = indexes.findIndex(
+        (item) => item.tableName === tableName && item.options?.name === indexName
+      );
+      if (idx >= 0) indexes.splice(idx, 1);
+    },
     async bulkInsert(tableName, records) {
       bulkInserts.push({ tableName, records });
     },
@@ -96,8 +103,8 @@ function createSpyQueryInterface() {
   };
 }
 
-describe('Shared Sequelize migrations compatibility (all 18 migrations / 16 active tables)', () => {
-  it('loads all 18 migrations in deterministic dependency order', () => {
+describe('Shared Sequelize migrations compatibility (all 19 migrations / 17 active tables)', () => {
+  it('loads all 19 migrations in deterministic dependency order', () => {
     const files = fs
       .readdirSync(migrationsDir)
       .filter((f) => f.endsWith('.cjs'))
@@ -106,7 +113,7 @@ describe('Shared Sequelize migrations compatibility (all 18 migrations / 16 acti
     assert.deepEqual(files, EXPECTED_MIGRATION_FILES);
   });
 
-  it('migrates all 16 active tables (including shipping_settings, orders, and order_items) and rolls back cleanly', async () => {
+  it('migrates all 17 active tables (including invoice_sequences and orders invoice columns) and rolls back cleanly', async () => {
     const qi = createSpyQueryInterface();
     const SequelizeStub = { ...DataTypes, fn };
 
@@ -134,9 +141,10 @@ describe('Shared Sequelize migrations compatibility (all 18 migrations / 16 acti
       'shipping_settings',
       'orders',
       'order_items',
+      'invoice_sequences',
     ]);
 
-    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 16 active tables
+    // Verify InnoDB + utf8mb4 across all 17 active tables (UUID v4 PK on entity tables; FY natural PK on invoice_sequences)
     for (const [tableName, { columns, options }] of qi.activeTables.entries()) {
       assert.equal(options.engine, 'InnoDB', `${tableName} must use InnoDB`);
       assert.equal(options.charset, 'utf8mb4', `${tableName} must use utf8mb4`);
@@ -145,10 +153,15 @@ describe('Shared Sequelize migrations compatibility (all 18 migrations / 16 acti
         'utf8mb4_unicode_ci',
         `${tableName} must use utf8mb4_unicode_ci`
       );
-      assert.equal(columns.id.primaryKey, true, `${tableName}.id must be primaryKey`);
-      assert.equal(columns.id.allowNull, false, `${tableName}.id must be NOT NULL`);
-      assert.equal(columns.id.type.key, 'CHAR', `${tableName}.id must be CHAR(36)`);
-      assert.equal(columns.id.type._length, 36, `${tableName}.id length must be 36`);
+      if (tableName === 'invoice_sequences') {
+        assert.equal(columns.financial_year.primaryKey, true);
+        assert.equal(columns.last_number.allowNull, false);
+      } else {
+        assert.equal(columns.id.primaryKey, true, `${tableName}.id must be primaryKey`);
+        assert.equal(columns.id.allowNull, false, `${tableName}.id must be NOT NULL`);
+        assert.equal(columns.id.type.key, 'CHAR', `${tableName}.id must be CHAR(36)`);
+        assert.equal(columns.id.type._length, 36, `${tableName}.id length must be 36`);
+      }
     }
 
     // Verify shipping_settings default seeded rows for IN (INR) and US (USD)
@@ -162,9 +175,19 @@ describe('Shared Sequelize migrations compatibility (all 18 migrations / 16 acti
       ]
     );
 
-    // Verify orders columns (no payment_expires_at, ON DELETE RESTRICT on user_id)
+    // Verify orders columns (independent invoice_number/invoice_issued_at, no payment_expires_at, ON DELETE RESTRICT on user_id)
     const orders = qi.activeTables.get('orders').columns;
     assert.equal(orders.payment_expires_at, undefined);
+    assert.ok(orders.invoice_number);
+    assert.ok(orders.invoice_issued_at);
+    assert.ok(
+      qi.indexes.some(
+        (idx) =>
+          idx.tableName === 'orders' &&
+          idx.options?.name === 'uq_orders_invoice_number' &&
+          idx.options?.unique === true
+      )
+    );
     assert.deepEqual(orders.user_id.references, { model: 'users', key: 'id' });
     assert.equal(orders.user_id.onDelete, 'RESTRICT');
     assert.deepEqual(orders.cancelled_by.type.values, ['customer', 'admin']);

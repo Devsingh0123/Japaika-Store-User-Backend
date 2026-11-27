@@ -33,6 +33,7 @@ import {
   getMarketCouponThresholds,
 } from './coupon.service.js';
 import { toOrderAddressSnapshot } from './profile.service.js';
+import { assignInvoiceNumberForOrder } from './invoice.service.js';
 import razorpayService from './razorpay.service.js';
 import emailService from './email.service.js';
 import { AppError } from '../utils/http.js';
@@ -94,6 +95,10 @@ export function serializeOrderDetail(order) {
   return {
     id: order.id,
     orderNumber: order.orderNumber,
+    invoice: {
+      invoiceNumber: order.invoiceNumber ?? null,
+      issuedAt: order.invoiceIssuedAt ? new Date(order.invoiceIssuedAt).toISOString() : null,
+    },
     status: order.status,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,
@@ -565,6 +570,7 @@ async function confirmOrderPaymentTransaction({
         },
         { transaction }
       );
+      await assignInvoiceNumberForOrder(order, { issuedAt: now, transaction });
     }
 
     const updatedOrder = await Order.findByPk(order.id, {
@@ -688,6 +694,10 @@ export function serializeOrderSummary(order) {
   return {
     id: order.id,
     orderNumber: order.orderNumber,
+    invoice: {
+      invoiceNumber: order.invoiceNumber ?? null,
+      issuedAt: order.invoiceIssuedAt ? new Date(order.invoiceIssuedAt).toISOString() : null,
+    },
     status: order.status,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,

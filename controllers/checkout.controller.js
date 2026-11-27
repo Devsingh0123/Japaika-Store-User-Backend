@@ -1,4 +1,5 @@
 import * as checkoutService from '../services/checkout.service.js';
+import * as invoiceService from '../services/invoice.service.js';
 import { sendSuccess } from '../utils/http.js';
 
 export async function getShippingConfig(req, res) {
@@ -76,4 +77,30 @@ export async function cancelOrder(req, res) {
     message: 'Order cancelled successfully.',
     data,
   });
+}
+
+export async function getOrderInvoice(req, res) {
+  const data = await invoiceService.getCustomerOrderInvoice(
+    req.user.id,
+    req.validatedParams.orderNumber
+  );
+  return sendSuccess(res, {
+    message: 'Order invoice retrieved successfully.',
+    data,
+  });
+}
+
+export async function downloadOrderInvoicePdf(req, res) {
+  const { invoice } = await invoiceService.getCustomerOrderInvoice(
+    req.user.id,
+    req.validatedParams.orderNumber
+  );
+  const pdfBuffer = await invoiceService.renderInvoicePdfBuffer(invoice);
+  const filename = invoiceService.sanitizeInvoiceFilename(invoice.invoiceNumber);
+  const disposition = req.validatedQuery?.disposition === 'inline' ? 'inline' : 'attachment';
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.status(200).send(pdfBuffer);
 }

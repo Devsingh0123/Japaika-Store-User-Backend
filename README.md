@@ -42,6 +42,7 @@ Customer-facing REST API for the standalone Japaika E-commerce platform, built w
    - `20261127001600-create-shipping-settings.cjs` (`shipping_settings` — admin-controlled `IN`/`INR` & `US`/`USD` shipping charges)
    - `20261127001700-create-orders.cjs` (`orders` — immutable order snapshots, Razorpay payment/refund references & tracking)
    - `20261127001800-create-order-items.cjs` (`order_items` — immutable line-item snapshots)
+   - `20261127001900-add-invoice-numbering.cjs` (`invoice_sequences` + `orders.invoice_number` / `invoice_issued_at` — independent FY sequential invoice numbering)
 
    To import verified postal code datasets (`.json`, `.csv`, or `.tsv`) into `postal_codes`:
    ```bash
@@ -105,5 +106,7 @@ npm test
 | `POST` | `/api/v1/webhooks/razorpay` | Razorpay HMAC | Server-to-server Razorpay webhook (`payment.captured` / `order.paid`) |
 | `GET` | `/api/v1/orders` | Access Cookie | Paginated customer order history (`?page=1&limit=10&status=...`) |
 | `GET` | `/api/v1/orders/:orderNumber` | Access Cookie | Get full customer order details, payment summary, and shipment tracking |
+| `GET` | `/api/v1/orders/:orderNumber/invoice` | Access Cookie | Get structured GST / Export invoice JSON with independent sequential `invoiceNumber` |
+| `GET` | `/api/v1/orders/:orderNumber/invoice/pdf` | Access Cookie | Download (`?disposition=attachment\|inline`) A4 PDF invoice (`application/pdf`) |
 | `POST` | `/api/v1/orders/:orderNumber/retry-payment` | Access Cookie | Resume Razorpay payment for a `pending_payment` order |
 | `POST` | `/api/v1/orders/:orderNumber/cancel` | Access Cookie | Pre-shipment self-cancellation (restores stock/coupon; preserves order & payment history) |

@@ -52,6 +52,19 @@ export default function defineOrderModel(sequelize) {
         unique: true,
         field: 'order_number',
       },
+      invoiceNumber: {
+        type: DataTypes.STRING(32),
+        allowNull: true,
+        defaultValue: null,
+        unique: true,
+        field: 'invoice_number',
+      },
+      invoiceIssuedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        defaultValue: null,
+        field: 'invoice_issued_at',
+      },
       userId: {
         type: DataTypes.UUID,
         allowNull: false,

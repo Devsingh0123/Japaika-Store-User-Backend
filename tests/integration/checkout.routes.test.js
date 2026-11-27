@@ -17,6 +17,7 @@ import {
 } from '../../models/index.js';
 import { ACCESS_COOKIE_NAME, signAccessToken } from '../../services/token.service.js';
 import razorpayService, { computePaymentSignature } from '../../services/razorpay.service.js';
+import { getIndianFinancialYear, sanitizeInvoiceFilename } from '../../services/invoice.service.js';
 import emailService from '../../services/email.service.js';
 import { AppError } from '../../utils/http.js';
 
@@ -49,11 +50,22 @@ describe('Checkout & Razorpay Payments (INR & USD) integration tests (/api/v1/ch
   let confirmEmailMock;
   let rzpOrderCounter = 0;
   let failNextRazorpayCreate = false;
+  let fyBeforeTests = null;
+  let seqBeforeTests = null;
+  let firstIssuedInvoiceNumber = null;
+  let secondIssuedInvoiceNumber = null;
 
   before(async () => {
     process.env.RAZORPAY_KEY_ID = TEST_KEY_ID;
     process.env.RAZORPAY_KEY_SECRET = TEST_KEY_SECRET;
     process.env.RAZORPAY_WEBHOOK_SECRET = TEST_WEBHOOK_SECRET;
+
+    fyBeforeTests = getIndianFinancialYear(new Date());
+    const [seqRows] = await sequelize.query(
+      'SELECT last_number FROM invoice_sequences WHERE financial_year = ?',
+      { replacements: [fyBeforeTests] }
+    );
+    seqBeforeTests = seqRows.length ? Number(seqRows[0].last_number) : null;
 
     customer = await User.create({
       email: `checkout.${runTag.toLowerCase()}@japaika-test.local`,
@@ -241,6 +253,18 @@ describe('Checkout & Razorpay Payments (INR & USD) integration tests (/api/v1/ch
       await UserAddress.destroy({ where: { userId: createdUserIds }, force: true });
       await User.destroy({ where: { id: createdUserIds }, force: true });
     }
+    if (fyBeforeTests) {
+      if (seqBeforeTests === null) {
+        await sequelize.query('DELETE FROM invoice_sequences WHERE financial_year = ?', {
+          replacements: [fyBeforeTests],
+        });
+      } else {
+        await sequelize.query(
+          'UPDATE invoice_sequences SET last_number = ? WHERE financial_year = ?',
+          { replacements: [seqBeforeTests, fyBeforeTests] }
+        );
+      }
+    }
     await sequelize.close();
   });
 
@@ -318,7 +342,13 @@ describe('Checkout & Razorpay Payments (INR & USD) integration tests (/api/v1/ch
     assert.equal(verifyRes.body.data.order.payment.razorpayPaymentId, paymentId);
     assert.ok(verifyRes.body.data.order.payment.paidAt);
 
-    // Calling verify-payment a second time is idempotent (200 OK)
+    // Independent sequential invoice number issued on payment confirmation
+    firstIssuedInvoiceNumber = verifyRes.body.data.order.invoice.invoiceNumber;
+    assert.match(firstIssuedInvoiceNumber, /^JPK\/\d{2}-\d{2}\/\d{5,}$/);
+    assert.notEqual(firstIssuedInvoiceNumber, order.orderNumber);
+    assert.ok(verifyRes.body.data.order.invoice.issuedAt);
+
+    // Calling verify-payment a second time is idempotent and does NOT increment invoiceNumber
     const duplicateVerifyRes = await request(app)
       .post('/api/v1/checkout/verify-payment')
       .set('Cookie', customerCookie)
@@ -330,6 +360,10 @@ describe('Checkout & Razorpay Payments (INR & USD) integration tests (/api/v1/ch
       });
     assert.equal(duplicateVerifyRes.status, 200);
     assert.equal(duplicateVerifyRes.body.data.order.status, 'confirmed');
+    assert.equal(
+      duplicateVerifyRes.body.data.order.invoice.invoiceNumber,
+      firstIssuedInvoiceNumber
+    );
   });
 
   it('creates a US (USD) order with $15 flat shipping when below $150 threshold and confirms via Razorpay webhook', async () => {
@@ -387,6 +421,14 @@ describe('Checkout & Razorpay Payments (INR & USD) integration tests (/api/v1/ch
     assert.equal(dbOrder.status, 'confirmed');
     assert.equal(dbOrder.paymentStatus, 'paid');
     assert.equal(dbOrder.razorpayPaymentId, `pay_${runTag}_US1`);
+    secondIssuedInvoiceNumber = dbOrder.invoiceNumber;
+    assert.match(secondIssuedInvoiceNumber, /^JPK\/\d{2}-\d{2}\/\d{5,}$/);
+    assert.notEqual(secondIssuedInvoiceNumber, order.orderNumber);
+
+    // Verify strictly consecutive sequential numbering between IN order #1 and US order #2
+    const seq1 = Number(firstIssuedInvoiceNumber.split('/').pop());
+    const seq2 = Number(secondIssuedInvoiceNumber.split('/').pop());
+    assert.equal(seq2, seq1 + 1);
   });
 
   it('rolls back stock and coupon deductions if Razorpay order creation fails, and rejects address country mismatch or insufficient stock', async () => {
@@ -452,7 +494,21 @@ describe('Checkout & Razorpay Payments (INR & USD) integration tests (/api/v1/ch
     const pendingOrder = pendingRes.body.data.order;
     createdOrderIds.push(pendingOrder.id);
 
-    // 2. Retry payment on pending_payment order -> 200 OK with razorpay config
+    // 2. Pending order has NO invoice number yet and rejects /invoice & /invoice/pdf with 409 INVOICE_UNAVAILABLE
+    assert.equal(pendingOrder.invoice.invoiceNumber, null);
+    const pendingInvoiceRes = await request(app)
+      .get(`/api/v1/orders/${pendingOrder.orderNumber}/invoice`)
+      .set('Cookie', customerCookie);
+    assert.equal(pendingInvoiceRes.status, 409);
+    assert.equal(pendingInvoiceRes.body.error.code, 'INVOICE_UNAVAILABLE');
+
+    const pendingPdfRes = await request(app)
+      .get(`/api/v1/orders/${pendingOrder.orderNumber}/invoice/pdf`)
+      .set('Cookie', customerCookie);
+    assert.equal(pendingPdfRes.status, 409);
+    assert.equal(pendingPdfRes.body.error.code, 'INVOICE_UNAVAILABLE');
+
+    // Retry payment on pending_payment order -> 200 OK with razorpay config
     const retryRes = await request(app)
       .post(`/api/v1/orders/${pendingOrder.orderNumber}/retry-payment`)
       .set('Cookie', customerCookie);
@@ -474,15 +530,64 @@ describe('Checkout & Razorpay Payments (INR & USD) integration tests (/api/v1/ch
       (o) => o.country === 'IN'
     ).orderNumber;
 
-    // 4. Get full order details by orderNumber
+    // 4. Get full order details, structured invoice JSON & downloadable PDF for confirmed IN order
     const detailRes = await request(app)
       .get(`/api/v1/orders/${confirmedOrderNumber}`)
       .set('Cookie', customerCookie);
     assert.equal(detailRes.status, 200);
     assert.equal(detailRes.body.data.order.orderNumber, confirmedOrderNumber);
+    assert.equal(detailRes.body.data.order.invoice.invoiceNumber, firstIssuedInvoiceNumber);
     assert.equal(detailRes.body.data.order.items.length, 1);
 
-    // 5. Cross-user ownership isolation (BR-10): otherCustomer gets 404 on GET, retry-payment, and cancel
+    const invoiceRes = await request(app)
+      .get(`/api/v1/orders/${confirmedOrderNumber}/invoice`)
+      .set('Cookie', customerCookie);
+    assert.equal(invoiceRes.status, 200);
+    const invoiceData = invoiceRes.body.data.invoice;
+    assert.equal(invoiceData.invoiceNumber, firstIssuedInvoiceNumber);
+    assert.equal(invoiceData.orderNumber, confirmedOrderNumber);
+    assert.equal(invoiceData.invoiceStatus, 'issued');
+    assert.equal(invoiceData.gstInclusive, true);
+    assert.equal(invoiceData.totals.grandTotalAmount, '16200.00');
+    assert.equal(invoiceData.totals.taxAmount, '471.84');
+    assert.equal(invoiceData.hsnSummary.length, 1);
+    assert.equal(invoiceData.hsnSummary[0].hsnCode, '7103');
+
+    const pdfRes = await request(app)
+      .get(`/api/v1/orders/${confirmedOrderNumber}/invoice/pdf`)
+      .set('Cookie', customerCookie)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+    assert.equal(pdfRes.status, 200);
+    assert.match(pdfRes.headers['content-type'], /^application\/pdf/);
+    assert.ok(
+      pdfRes.headers['content-disposition'].includes(
+        sanitizeInvoiceFilename(firstIssuedInvoiceNumber)
+      )
+    );
+    assert.equal(pdfRes.body.subarray(0, 5).toString('ascii'), '%PDF-');
+
+    // 5. Cross-user ownership isolation (BR-10): otherCustomer gets 404 on GET, invoice, invoice/pdf, retry-payment, and cancel
+    assert.equal(
+      (
+        await request(app)
+          .get(`/api/v1/orders/${confirmedOrderNumber}/invoice`)
+          .set('Cookie', otherCookie)
+      ).status,
+      404
+    );
+    assert.equal(
+      (
+        await request(app)
+          .get(`/api/v1/orders/${confirmedOrderNumber}/invoice/pdf`)
+          .set('Cookie', otherCookie)
+      ).status,
+      404
+    );
     assert.equal(
       (
         await request(app)
@@ -533,13 +638,22 @@ describe('Checkout & Razorpay Payments (INR & USD) integration tests (/api/v1/ch
     assert.equal(stockAfterCancel, stockBeforeCancel + 1);
     assert.equal(couponAfterCancel, couponBeforeCancel - 1);
 
-    // Cancelled order remains permanently preserved in database and GET /api/v1/orders
+    // Cancelled order & its independent invoice remain permanently preserved
     const preservedRes = await request(app)
       .get(`/api/v1/orders/${confirmedOrderNumber}`)
       .set('Cookie', customerCookie);
     assert.equal(preservedRes.status, 200);
     assert.equal(preservedRes.body.data.order.status, 'cancelled');
+    assert.equal(preservedRes.body.data.order.invoice.invoiceNumber, firstIssuedInvoiceNumber);
     assert.equal(preservedRes.body.data.order.items.length, 1);
+
+    const cancelledInvoiceRes = await request(app)
+      .get(`/api/v1/orders/${confirmedOrderNumber}/invoice`)
+      .set('Cookie', customerCookie);
+    assert.equal(cancelledInvoiceRes.status, 200);
+    assert.equal(cancelledInvoiceRes.body.data.invoice.invoiceNumber, firstIssuedInvoiceNumber);
+    assert.equal(cancelledInvoiceRes.body.data.invoice.invoiceStatus, 'cancelled');
+    assert.equal(cancelledInvoiceRes.body.data.invoice.payment.refundAmount, '16200.00');
 
     // 7. Rejects self-cancellation once an order has progressed to 'shipped'
     const usOrderNumber = confirmedListRes.body.data.items.find(
