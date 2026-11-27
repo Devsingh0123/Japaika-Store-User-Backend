@@ -234,12 +234,16 @@ describe('Customer Coupon & Browser-Cart Validation API integration tests (/api/
         subtotal: '36000.00',
         discountAmount: '2500.00',
         payableSubtotal: '33500.00',
+        shippingAmount: '0.00',
+        freeShippingThreshold: '0.00',
+        isFreeShipping: true,
+        grandTotal: '33500.00',
         hasStockIssues: false,
       });
     });
 
     it('allows any customer who knows a hidden coupon code to redeem it in US (USD)', async () => {
-      // 1 x 250 USD = 250 USD subtotal; VIP20 (20% off, min 100 USD, no cap) -> 50.00 USD discount -> 200.00 USD payable
+      // 1 x 250 USD = 250 USD subtotal; VIP20 (20% off, min 100 USD, no cap) -> 50.00 USD discount -> 200.00 USD payable (>= 150 USD free shipping threshold)
       const res = await request(app)
         .post('/api/v1/coupons/validate')
         .send({
@@ -258,6 +262,10 @@ describe('Customer Coupon & Browser-Cart Validation API integration tests (/api/
         subtotal: '250.00',
         discountAmount: '50.00',
         payableSubtotal: '200.00',
+        shippingAmount: '0.00',
+        freeShippingThreshold: '150.00',
+        isFreeShipping: true,
+        grandTotal: '200.00',
         hasStockIssues: false,
       });
     });

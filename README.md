@@ -14,9 +14,10 @@ Customer-facing REST API for the standalone Japaika E-commerce platform, built w
    ```
 
 2. **Configure environment variables**:
-   Create `.env` (using `.env.example` as a reference) with your local MySQL credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) and 3 customer auth secrets (`USER_JWT_ACCESS_SECRET`, `USER_JWT_REFRESH_SECRET`, `OTP_HMAC_SECRET`):
+   Create `.env` (using `.env.example` as a reference) with your local MySQL credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`), 3 customer auth secrets (`USER_JWT_ACCESS_SECRET`, `USER_JWT_REFRESH_SECRET`, `OTP_HMAC_SECRET`), and Razorpay credentials (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, optional `RAZORPAY_WEBHOOK_SECRET`):
    - Leave `SMTP_HOST` unset locally to log OTP codes directly to the server console.
    - Set `SMTP_HOST` (plus `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) for staging/production (`SMTP_HOST` is mandatory in `NODE_ENV=production`).
+   - Razorpay integration uses the official `razorpay` Node.js SDK (`INR` & `USD`, no fake payment fallback).
 
 3. **Create the MySQL database and run migrations**:
    ```bash
@@ -38,6 +39,9 @@ Customer-facing REST API for the standalone Japaika E-commerce platform, built w
    - `20261126001300-create-user-addresses.cjs` (`user_addresses` — customer shipping address book with `city`, `district`, `state`)
    - `20261126001400-create-postal-codes.cjs` (`postal_codes` — self-hosted MySQL postal directory for `city`, `district`, `state` auto-fill)
    - `20261126001500-create-coupons.cjs` (`coupons` — regional `INR`/`USD` percentage discount coupons with `public`/`hidden` visibility)
+   - `20261127001600-create-shipping-settings.cjs` (`shipping_settings` — admin-controlled `IN`/`INR` & `US`/`USD` shipping charges)
+   - `20261127001700-create-orders.cjs` (`orders` — immutable order snapshots, Razorpay payment/refund references & tracking)
+   - `20261127001800-create-order-items.cjs` (`order_items` — immutable line-item snapshots)
 
    To import verified postal code datasets (`.json`, `.csv`, or `.tsv`) into `postal_codes`:
    ```bash
@@ -94,4 +98,12 @@ npm test
 | `PATCH` | `/api/v1/addresses/:id/default` | Access Cookie | Designate an owned address as the customer's default shipping address |
 | `DELETE` | `/api/v1/addresses/:id` | Access Cookie | Soft-delete an owned address (auto-promotes next most recent address if default) |
 | `GET` | `/api/v1/coupons` | Public | List active, non-expired, non-exhausted `public` coupons (`?country=IN\|US`) |
-| `POST` | `/api/v1/coupons/validate` | Public | Validate Browser-First Cart items (live regional prices & stock) and optional `public` or `hidden` `couponCode` |
+| `POST` | `/api/v1/coupons/validate` | Public | Validate Browser-First Cart items (live regional prices, stock & shipping) and optional `public` or `hidden` `couponCode` |
+| `GET` | `/api/v1/checkout/shipping` | Public | Get active shipping rule (`flatCharge`, `freeShippingThreshold`) for `?country=IN\|US` |
+| `POST` | `/api/v1/checkout/create-order` | Access Cookie | Atomically reserve/deduct stock & coupon, create immutable order + Razorpay order (`INR`/`USD`) |
+| `POST` | `/api/v1/checkout/verify-payment` | Access Cookie | Verify Razorpay payment signature (idempotent) and confirm order |
+| `POST` | `/api/v1/webhooks/razorpay` | Razorpay HMAC | Server-to-server Razorpay webhook (`payment.captured` / `order.paid`) |
+| `GET` | `/api/v1/orders` | Access Cookie | Paginated customer order history (`?page=1&limit=10&status=...`) |
+| `GET` | `/api/v1/orders/:orderNumber` | Access Cookie | Get full customer order details, payment summary, and shipment tracking |
+| `POST` | `/api/v1/orders/:orderNumber/retry-payment` | Access Cookie | Resume Razorpay payment for a `pending_payment` order |
+| `POST` | `/api/v1/orders/:orderNumber/cancel` | Access Cookie | Pre-shipment self-cancellation (restores stock/coupon; preserves order & payment history) |

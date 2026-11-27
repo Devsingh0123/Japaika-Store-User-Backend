@@ -1,24 +1,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import {
-  ADDRESS_LABELS,
-  SUPPORTED_COUNTRIES,
-  DEFAULT_COUNTRY,
-} from '../models/index.js';
+import { ADDRESS_LABELS } from '../models/index.js';
 import requireCustomerAuth from '../middlewares/auth.middleware.js';
 import {
   validateBody,
   validateQuery,
   validateParams,
+  countryCodeField,
   countryQueryField,
 } from '../middlewares/validate.middleware.js';
 import { isValidPhone } from '../services/profile.service.js';
 import * as profileController from '../controllers/profile.controller.js';
-
-const countryCodeField = z.preprocess(
-  (val) => (typeof val === 'string' && val.trim() !== '' ? val.trim().toUpperCase() : val),
-  z.enum(SUPPORTED_COUNTRIES)
-);
 
 const postalLookupQuerySchema = z.object({
   country: countryQueryField,
@@ -92,7 +84,7 @@ const createAddressSchema = z.object({
     .trim()
     .min(1, 'Postal code is required.')
     .max(20, 'Postal code cannot exceed 20 characters.'),
-  country: countryCodeField.default(DEFAULT_COUNTRY),
+  country: countryQueryField,
   isDefault: z.boolean().optional(),
 });
 

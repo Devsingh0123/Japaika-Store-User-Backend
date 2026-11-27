@@ -4,22 +4,17 @@ import {
   Coupon,
   Product,
   ProductVariant,
+  ShippingSetting,
   COUPON_VISIBILITIES,
   PRODUCT_STATUSES,
-  SUPPORTED_MARKETS,
   DEFAULT_COUNTRY,
 } from '../models/index.js';
-import { extractMarketPricing, loadVisibleCategories } from './catalog.service.js';
+import {
+  resolveMarket,
+  extractMarketPricing,
+  loadVisibleCategories,
+} from './catalog.service.js';
 import { AppError } from '../utils/http.js';
-
-function resolveMarket(country = DEFAULT_COUNTRY) {
-  const code = String(country || DEFAULT_COUNTRY).trim().toUpperCase();
-  const market = SUPPORTED_MARKETS[code];
-  if (!market) {
-    throw new AppError(400, 'VALIDATION_ERROR', `Unsupported market country: ${code}`);
-  }
-  return market;
-}
 
 export function toMinorUnits(amount) {
   const num = Number(amount || 0);
@@ -76,7 +71,54 @@ export function calculatePercentageDiscountMinor({
   };
 }
 
-function getMarketCouponThresholds(coupon, market) {
+export async function calculateMarketShipping(
+  country,
+  payableSubtotalMinor,
+  { hasValidItems = true, setting = null } = {}
+) {
+  const shippingSetting =
+    setting ||
+    (await ShippingSetting.findOne({
+      where: { country },
+    }));
+
+  if (!shippingSetting || !shippingSetting.isActive) {
+    return {
+      isShippingAvailable: false,
+      shippingMinor: 0,
+      shippingAmount: '0.00',
+      freeShippingThreshold: null,
+      isFreeShipping: false,
+      estimatedDeliveryDays: { min: null, max: null },
+    };
+  }
+
+  const flatMinor = toMinorUnits(shippingSetting.flatCharge);
+  const thresholdMinor =
+    shippingSetting.freeShippingThreshold !== null &&
+    shippingSetting.freeShippingThreshold !== undefined
+      ? toMinorUnits(shippingSetting.freeShippingThreshold)
+      : null;
+
+  const isFreeShipping =
+    !hasValidItems || (thresholdMinor !== null && payableSubtotalMinor >= thresholdMinor);
+  const shippingMinor = isFreeShipping ? 0 : flatMinor;
+
+  return {
+    isShippingAvailable: true,
+    shippingMinor,
+    shippingAmount: formatMinorUnits(shippingMinor),
+    freeShippingThreshold:
+      thresholdMinor !== null ? formatMinorUnits(thresholdMinor) : null,
+    isFreeShipping,
+    estimatedDeliveryDays: {
+      min: shippingSetting.estimatedDaysMin ?? null,
+      max: shippingSetting.estimatedDaysMax ?? null,
+    },
+  };
+}
+
+export function getMarketCouponThresholds(coupon, market) {
   const isUs = market.country === 'US';
   const minRaw = isUs ? coupon.minCartSubtotalUsd : coupon.minCartSubtotalInr;
   const maxRaw = isUs ? coupon.maxDiscountUsd : coupon.maxDiscountInr;
@@ -170,6 +212,7 @@ export async function validateCartAndCoupon({
   const evaluatedItems = [];
   let subtotalMinor = 0;
   let itemCount = 0;
+  let validItemCount = 0;
   let hasStockIssues = false;
 
   for (const [variantId, requestedQuantity] of mergedQuantities.entries()) {
@@ -221,6 +264,7 @@ export async function validateCartAndCoupon({
 
     subtotalMinor += lineTotalMinor;
     itemCount += requestedQuantity;
+    validItemCount += 1;
 
     evaluatedItems.push({
       variantId: variant.id,
@@ -318,6 +362,11 @@ export async function validateCartAndCoupon({
     };
   }
 
+  const shippingQuote = await calculateMarketShipping(market.country, payableSubtotalMinor, {
+    hasValidItems: validItemCount > 0,
+  });
+  const grandTotalMinor = payableSubtotalMinor + shippingQuote.shippingMinor;
+
   return {
     country: market.country,
     currency: market.currency,
@@ -328,6 +377,10 @@ export async function validateCartAndCoupon({
       subtotal: formatMinorUnits(subtotalMinor),
       discountAmount: formatMinorUnits(discountMinor),
       payableSubtotal: formatMinorUnits(payableSubtotalMinor),
+      shippingAmount: shippingQuote.shippingAmount,
+      freeShippingThreshold: shippingQuote.freeShippingThreshold,
+      isFreeShipping: shippingQuote.isFreeShipping,
+      grandTotal: formatMinorUnits(grandTotalMinor),
       hasStockIssues,
     },
   };

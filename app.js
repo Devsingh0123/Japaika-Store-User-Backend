@@ -10,6 +10,9 @@ import bannerRoutes from './routes/banner.routes.js';
 import profileRoutes from './routes/profile.routes.js';
 import addressRoutes from './routes/address.routes.js';
 import couponRoutes from './routes/coupon.routes.js';
+import checkoutRoutes from './routes/checkout.routes.js';
+import orderRoutes from './routes/order.routes.js';
+import * as checkoutController from './controllers/checkout.controller.js';
 import { notFoundHandler, errorHandler } from './middlewares/error.middleware.js';
 import { sendSuccess, sendError } from './utils/http.js';
 
@@ -27,7 +30,16 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '100kb' }));
+app.use(
+  express.json({
+    limit: '100kb',
+    verify: (req, _res, buf) => {
+      if (req.originalUrl?.startsWith('/api/v1/webhooks/razorpay')) {
+        req.rawBody = buf;
+      }
+    },
+  })
+);
 app.use(cookieParser());
 
 app.get('/api/v1/health', async (_req, res) => {
@@ -53,6 +65,9 @@ app.use('/api/v1/banners', bannerRoutes);
 app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/addresses', addressRoutes);
 app.use('/api/v1/coupons', couponRoutes);
+app.use('/api/v1/checkout', checkoutRoutes);
+app.use('/api/v1/orders', orderRoutes);
+app.post('/api/v1/webhooks/razorpay', checkoutController.handleRazorpayWebhook);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

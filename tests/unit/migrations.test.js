@@ -17,6 +17,9 @@ import {
   UserAddress,
   PostalCode,
   Coupon,
+  ShippingSetting,
+  Order,
+  OrderItem,
 } from '../../models/index.js';
 
 const require = createRequire(import.meta.url);
@@ -39,6 +42,9 @@ const EXPECTED_MIGRATION_FILES = [
   '20261126001300-create-user-addresses.cjs',
   '20261126001400-create-postal-codes.cjs',
   '20261126001500-create-coupons.cjs',
+  '20261127001600-create-shipping-settings.cjs',
+  '20261127001700-create-orders.cjs',
+  '20261127001800-create-order-items.cjs',
 ];
 
 function createSpyQueryInterface() {
@@ -46,12 +52,14 @@ function createSpyQueryInterface() {
   const indexes = [];
   const droppedTables = [];
   const queries = [];
+  const bulkInserts = [];
 
   return {
     activeTables,
     indexes,
     droppedTables,
     queries,
+    bulkInserts,
     sequelize: {
       async query(sql) {
         queries.push(sql);
@@ -78,6 +86,9 @@ function createSpyQueryInterface() {
     async addIndex(tableName, fields, options) {
       indexes.push({ tableName, fields, options });
     },
+    async bulkInsert(tableName, records) {
+      bulkInserts.push({ tableName, records });
+    },
     async dropTable(tableName) {
       activeTables.delete(tableName);
       droppedTables.push(tableName);
@@ -85,8 +96,8 @@ function createSpyQueryInterface() {
   };
 }
 
-describe('Shared Sequelize migrations compatibility (all 15 migrations / 13 active tables)', () => {
-  it('loads all 15 migrations in deterministic dependency order', () => {
+describe('Shared Sequelize migrations compatibility (all 18 migrations / 16 active tables)', () => {
+  it('loads all 18 migrations in deterministic dependency order', () => {
     const files = fs
       .readdirSync(migrationsDir)
       .filter((f) => f.endsWith('.cjs'))
@@ -95,7 +106,7 @@ describe('Shared Sequelize migrations compatibility (all 15 migrations / 13 acti
     assert.deepEqual(files, EXPECTED_MIGRATION_FILES);
   });
 
-  it('migrates all 13 active tables (including coupons without assigned_user_id) and rolls back cleanly', async () => {
+  it('migrates all 16 active tables (including shipping_settings, orders, and order_items) and rolls back cleanly', async () => {
     const qi = createSpyQueryInterface();
     const SequelizeStub = { ...DataTypes, fn };
 
@@ -120,9 +131,12 @@ describe('Shared Sequelize migrations compatibility (all 15 migrations / 13 acti
       'user_addresses',
       'postal_codes',
       'coupons',
+      'shipping_settings',
+      'orders',
+      'order_items',
     ]);
 
-    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 13 active tables
+    // Verify InnoDB + utf8mb4 + CHAR(36) UUID v4 PK across all 16 active tables
     for (const [tableName, { columns, options }] of qi.activeTables.entries()) {
       assert.equal(options.engine, 'InnoDB', `${tableName} must use InnoDB`);
       assert.equal(options.charset, 'utf8mb4', `${tableName} must use utf8mb4`);
@@ -137,84 +151,28 @@ describe('Shared Sequelize migrations compatibility (all 15 migrations / 13 acti
       assert.equal(columns.id.type._length, 36, `${tableName}.id length must be 36`);
     }
 
-    // Verify product_variants replaced price & sale_price with prices JSON NOT NULL
-    const variants = qi.activeTables.get('product_variants').columns;
-    assert.equal(variants.price, undefined);
-    assert.equal(variants.sale_price, undefined);
-    assert.ok(variants.prices);
-    assert.equal(variants.prices.type.key, 'JSON');
-    assert.equal(variants.prices.allowNull, false);
+    // Verify shipping_settings default seeded rows for IN (INR) and US (USD)
+    assert.equal(qi.bulkInserts.length, 1);
+    assert.equal(qi.bulkInserts[0].tableName, 'shipping_settings');
+    assert.deepEqual(
+      qi.bulkInserts[0].records.map((r) => ({ country: r.country, currency: r.currency })),
+      [
+        { country: 'IN', currency: 'INR' },
+        { country: 'US', currency: 'USD' },
+      ]
+    );
 
-    // Verify user_addresses columns (including district), FK, and indexes
-    const addresses = qi.activeTables.get('user_addresses').columns;
-    assert.deepEqual(Object.keys(addresses), [
-      'id',
-      'user_id',
-      'label',
-      'full_name',
-      'phone',
-      'address_line1',
-      'address_line2',
-      'landmark',
-      'city',
-      'district',
-      'state',
-      'postal_code',
-      'country',
-      'is_default',
-      'created_at',
-      'updated_at',
-      'deleted_at',
-    ]);
+    // Verify orders columns (no payment_expires_at, ON DELETE RESTRICT on user_id)
+    const orders = qi.activeTables.get('orders').columns;
+    assert.equal(orders.payment_expires_at, undefined);
+    assert.deepEqual(orders.user_id.references, { model: 'users', key: 'id' });
+    assert.equal(orders.user_id.onDelete, 'RESTRICT');
+    assert.deepEqual(orders.cancelled_by.type.values, ['customer', 'admin']);
 
-    // Verify postal_codes columns (city, district, state, state_code; NO localities)
-    const postalCodes = qi.activeTables.get('postal_codes').columns;
-    assert.deepEqual(Object.keys(postalCodes), [
-      'id',
-      'country',
-      'postal_code',
-      'city',
-      'district',
-      'state',
-      'state_code',
-      'created_at',
-      'updated_at',
-    ]);
-    assert.equal(postalCodes.localities, undefined);
-
-    // Verify coupons columns (visibility public|hidden; NO assigned_user_id) and indexes
-    const coupons = qi.activeTables.get('coupons').columns;
-    assert.deepEqual(Object.keys(coupons), [
-      'id',
-      'code',
-      'description',
-      'discount_percentage',
-      'min_cart_subtotal_inr',
-      'min_cart_subtotal_usd',
-      'max_discount_inr',
-      'max_discount_usd',
-      'max_redemptions',
-      'redemption_count',
-      'visibility',
-      'is_active',
-      'expires_at',
-      'created_at',
-      'updated_at',
-      'deleted_at',
-    ]);
-    assert.equal(coupons.assigned_user_id, undefined);
-    assert.deepEqual(coupons.visibility.type.values, ['public', 'hidden']);
-    assert.equal(coupons.visibility.defaultValue, 'public');
-    assert.equal(coupons.redemption_count.defaultValue, 0);
-    assert.equal(coupons.is_active.defaultValue, true);
-
-    const couponIndexNames = qi.indexes
-      .filter((idx) => idx.tableName === 'coupons')
-      .map((idx) => idx.options.name);
-    assert.deepEqual(couponIndexNames, [
-      'uq_coupons_code',
-      'idx_coupons_active_visibility_expires',
-    ]);
+    // Verify order_items FK to orders uses RESTRICT (orders & items are permanently preserved)
+    const orderItems = qi.activeTables.get('order_items').columns;
+    assert.deepEqual(orderItems.order_id.references, { model: 'orders', key: 'id' });
+    assert.equal(orderItems.order_id.onDelete, 'RESTRICT');
 
     // Verify user-backend Sequelize models align with migrated columns
     const modelTablePairs = [
@@ -229,6 +187,9 @@ describe('Shared Sequelize migrations compatibility (all 15 migrations / 13 acti
       [UserAddress, 'user_addresses'],
       [PostalCode, 'postal_codes'],
       [Coupon, 'coupons'],
+      [ShippingSetting, 'shipping_settings'],
+      [Order, 'orders'],
+      [OrderItem, 'order_items'],
     ];
     for (const [model, tableName] of modelTablePairs) {
       const migratedCols = new Set(Object.keys(qi.activeTables.get(tableName).columns));

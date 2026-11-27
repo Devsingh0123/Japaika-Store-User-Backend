@@ -85,6 +85,63 @@ const emailService = {
 
     return { delivered: true, transport: 'smtp', messageId: info.messageId };
   },
+
+  async sendOrderConfirmationEmail({ to, order }) {
+    const config = getEmailConfig();
+    const grandTotal = order.pricing?.grandTotalAmount ?? order.grandTotalAmount ?? '0.00';
+    const subject = `Order Confirmed: ${order.orderNumber} — Japaika`;
+    const text = [
+      `Thank you for your order with Japaika!`,
+      `Order Number: ${order.orderNumber}`,
+      `Amount Paid: ${order.currency} ${grandTotal}`,
+      `Status: ${order.status}`,
+    ].join('\n');
+
+    if (config.transport === 'console') {
+      if (!config.isTest) {
+        console.info(`[EMAIL:CONSOLE] To: ${to} | Subject: ${subject}`);
+      }
+      return { delivered: true, transport: 'console' };
+    }
+
+    const info = await getSmtpTransporter(config.smtp).sendMail({
+      from: config.from,
+      to,
+      subject,
+      text,
+    });
+    return { delivered: true, transport: 'smtp', messageId: info.messageId };
+  },
+
+  async sendOrderCancelledEmail({ to, order }) {
+    const config = getEmailConfig();
+    const cancellationReason = order.cancellation?.reason ?? order.cancellationReason;
+    const subject = `Order Cancelled: ${order.orderNumber} — Japaika`;
+    const text = [
+      `Your Japaika order ${order.orderNumber} has been cancelled.`,
+      cancellationReason ? `Reason: ${cancellationReason}` : '',
+      order.paymentStatus === 'refund_pending'
+        ? 'Your refund has been queued for processing.'
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    if (config.transport === 'console') {
+      if (!config.isTest) {
+        console.info(`[EMAIL:CONSOLE] To: ${to} | Subject: ${subject}`);
+      }
+      return { delivered: true, transport: 'console' };
+    }
+
+    const info = await getSmtpTransporter(config.smtp).sendMail({
+      from: config.from,
+      to,
+      subject,
+      text,
+    });
+    return { delivered: true, transport: 'smtp', messageId: info.messageId };
+  },
 };
 
 export default emailService;

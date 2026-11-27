@@ -20,6 +20,18 @@ import defineCouponModel, {
   COUPON_VISIBILITIES,
   ALL_COUPON_VISIBILITIES,
 } from './coupon.model.js';
+import defineShippingSettingModel from './shippingSetting.model.js';
+import defineOrderModel, {
+  ORDER_STATUSES,
+  ALL_ORDER_STATUSES,
+  PAYMENT_METHODS,
+  ALL_PAYMENT_METHODS,
+  PAYMENT_STATUSES,
+  ALL_PAYMENT_STATUSES,
+  CANCELLED_BY_ACTORS,
+  ALL_CANCELLED_BY_ACTORS,
+} from './order.model.js';
+import defineOrderItemModel from './orderItem.model.js';
 
 const User = defineUserModel(sequelize);
 const UserOtp = defineUserOtpModel(sequelize);
@@ -32,6 +44,9 @@ const Banner = defineBannerModel(sequelize);
 const UserAddress = defineUserAddressModel(sequelize);
 const PostalCode = definePostalCodeModel(sequelize);
 const Coupon = defineCouponModel(sequelize);
+const ShippingSetting = defineShippingSettingModel(sequelize);
+const Order = defineOrderModel(sequelize);
+const OrderItem = defineOrderItemModel(sequelize);
 
 User.hasMany(UserRefreshToken, {
   foreignKey: 'user_id',
@@ -51,6 +66,56 @@ User.hasMany(UserAddress, {
 UserAddress.belongsTo(User, {
   foreignKey: { name: 'userId', field: 'user_id' },
   as: 'user',
+});
+
+User.hasMany(Order, {
+  foreignKey: { name: 'userId', field: 'user_id' },
+  as: 'orders',
+});
+
+Order.belongsTo(User, {
+  foreignKey: { name: 'userId', field: 'user_id' },
+  as: 'user',
+});
+
+Coupon.hasMany(Order, {
+  foreignKey: { name: 'couponId', field: 'coupon_id' },
+  as: 'orders',
+});
+
+Order.belongsTo(Coupon, {
+  foreignKey: { name: 'couponId', field: 'coupon_id' },
+  as: 'coupon',
+});
+
+Order.hasMany(OrderItem, {
+  foreignKey: { name: 'orderId', field: 'order_id' },
+  as: 'items',
+});
+
+OrderItem.belongsTo(Order, {
+  foreignKey: { name: 'orderId', field: 'order_id' },
+  as: 'order',
+});
+
+Product.hasMany(OrderItem, {
+  foreignKey: { name: 'productId', field: 'product_id' },
+  as: 'orderItems',
+});
+
+OrderItem.belongsTo(Product, {
+  foreignKey: { name: 'productId', field: 'product_id' },
+  as: 'product',
+});
+
+ProductVariant.hasMany(OrderItem, {
+  foreignKey: { name: 'variantId', field: 'variant_id' },
+  as: 'orderItems',
+});
+
+OrderItem.belongsTo(ProductVariant, {
+  foreignKey: { name: 'variantId', field: 'variant_id' },
+  as: 'variant',
 });
 
 Category.belongsTo(Category, {
@@ -106,6 +171,9 @@ export {
   UserAddress,
   PostalCode,
   Coupon,
+  ShippingSetting,
+  Order,
+  OrderItem,
   PRODUCT_TYPES,
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
@@ -117,6 +185,14 @@ export {
   ADDRESS_COUNTRY_RULES,
   COUPON_VISIBILITIES,
   ALL_COUPON_VISIBILITIES,
+  ORDER_STATUSES,
+  ALL_ORDER_STATUSES,
+  PAYMENT_METHODS,
+  ALL_PAYMENT_METHODS,
+  PAYMENT_STATUSES,
+  ALL_PAYMENT_STATUSES,
+  CANCELLED_BY_ACTORS,
+  ALL_CANCELLED_BY_ACTORS,
 };
 
 export default {
@@ -132,6 +208,9 @@ export default {
   UserAddress,
   PostalCode,
   Coupon,
+  ShippingSetting,
+  Order,
+  OrderItem,
   PRODUCT_TYPES,
   PRODUCT_STATUSES,
   PRODUCT_MEDIA_TYPES,
@@ -143,4 +222,12 @@ export default {
   ADDRESS_COUNTRY_RULES,
   COUPON_VISIBILITIES,
   ALL_COUPON_VISIBILITIES,
+  ORDER_STATUSES,
+  ALL_ORDER_STATUSES,
+  PAYMENT_METHODS,
+  ALL_PAYMENT_METHODS,
+  PAYMENT_STATUSES,
+  ALL_PAYMENT_STATUSES,
+  CANCELLED_BY_ACTORS,
+  ALL_CANCELLED_BY_ACTORS,
 };

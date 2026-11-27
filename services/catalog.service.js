@@ -12,7 +12,7 @@ import {
 } from '../models/index.js';
 import { AppError } from '../utils/http.js';
 
-function resolveMarket(country = DEFAULT_COUNTRY) {
+export function resolveMarket(country = DEFAULT_COUNTRY) {
   const code = String(country || DEFAULT_COUNTRY).trim().toUpperCase();
   const market = SUPPORTED_MARKETS[code];
   if (!market) {
@@ -39,7 +39,7 @@ function buildActiveMarketVariantExistsSql(country) {
   return `EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = Product.id AND pv.is_active = 1 AND pv.deleted_at IS NULL AND ${sqlMarketPrice(country)} > 0)`;
 }
 
-function parseJsonField(value, fallback) {
+export function parseJsonField(value, fallback = null) {
   if (value === null || value === undefined) return fallback;
   if (typeof value === 'string') {
     try {
